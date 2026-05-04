@@ -1,4 +1,4 @@
-import { existsSync } from "fs";
+import { existsSync, readdirSync } from "fs";
 import { join } from "path";
 import { tmux, saveTabOrder, restoreTabOrder } from "../../sdk";
 import { buildCommandInDir, getEnvVars } from "../../config";
