@@ -11,7 +11,7 @@
  *   1. fleet windows         — `<FLEET_DIR>/*.json`               (session+window per oracle)
  *   2. config.sessions       — `Record<oracle, sessionId>`        (claude UUID per oracle)
  *   3. config.agents         — `Record<oracle, node>`             (federation routing)
- *   4. oracle registry cache — `<CONFIG_DIR>/oracles.json`        (filesystem-discovered org/repo metadata)
+ *   4. oracle registry cache — `oracles.json` cache file        (filesystem-discovered org/repo metadata)
  *   5. worktree scan         — git worktrees on disk              (fallback discovery)
  *
  * Consumers (`maw oracle ls`, `shouldAutoWake`, `resolveTarget`, `maw doctor`)
@@ -58,7 +58,8 @@
 
 import { existsSync, readdirSync, readFileSync } from "fs";
 import { join } from "path";
-import { CONFIG_DIR, FLEET_DIR } from "../core/paths";
+import { FLEET_DIR } from "../core/paths";
+import { mawCachePath } from "../core/xdg";
 import { readCache } from "../core/fleet/oracle-registry";
 import type { OracleEntry, RegistryCache } from "../core/fleet/oracle-registry";
 import { loadConfig } from "../config";
@@ -71,7 +72,7 @@ export type OracleManifestSource =
   | "fleet"          // <FLEET_DIR>/*.json — fleet config windows
   | "session"        // config.sessions — Claude session UUID per oracle
   | "agent"          // config.agents   — node mapping for federation
-  | "oracles-json"   // <CONFIG_DIR>/oracles.json — filesystem-discovered cache
+  | "oracles-json"   // oracles.json cache — filesystem-discovered cache
   | "worktree";      // git worktree fallback — populated only by opt-in loader
 
 /**
@@ -112,7 +113,7 @@ export interface OracleManifestEntry {
   /** Lineage: ISO timestamp of bud — `oracles-json`. */
   buddedAt?: string | null;
 
-  /** Birth cache metadata from `<CONFIG_DIR>/oracle-births.json` (#1806). */
+  /** Birth cache metadata from the cache-path `oracle-births.json` (#1806). */
   born?: OracleBirthInfo;
 
   /** Has ψ/ directory on disk — `oracles-json`. */
@@ -169,7 +170,7 @@ function isBirthInfo(value: unknown): value is OracleBirthInfo {
  * shapes so the CLI can consume existing caches without pinning the skill layer
  * to one historical layout.
  */
-export function loadOracleBirths(file: string = join(CONFIG_DIR, ORACLE_BIRTHS_FILE)): OracleBirthsByName {
+export function loadOracleBirths(file: string = mawCachePath(ORACLE_BIRTHS_FILE)): OracleBirthsByName {
   if (!existsSync(file)) return {};
   try {
     const raw = JSON.parse(readFileSync(file, "utf-8")) as Record<string, unknown>;

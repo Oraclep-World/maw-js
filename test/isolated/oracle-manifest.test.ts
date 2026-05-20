@@ -7,7 +7,8 @@
  *   2. config.sessions       (Record<oracle, sessionId>)
  *   3. config.agents         (Record<oracle, node>)
  *   4. oracles-json cache    (CONFIG_DIR/oracles.json)
- *   5. worktree scan         (deferred — covered by mergeOraclesJsonEntry shape)
+ *   5. oracle-births cache  (MAW_CACHE_DIR/oracle-births.json)
+ *   6. worktree scan         (deferred — covered by mergeOraclesJsonEntry shape)
  *
  * Isolated (per-file subprocess) because we mutate process.env.MAW_CONFIG_DIR
  * BEFORE importing the target module. `src/core/paths.ts` captures CONFIG_DIR
@@ -21,10 +22,13 @@ import { tmpdir } from "os";
 
 // ─── Pin CONFIG_DIR + FLEET_DIR to a sandboxed tmp dir BEFORE imports ───────
 const TEST_CONFIG_DIR = mkdtempSync(join(tmpdir(), "maw-manifest-836-"));
+const TEST_CACHE_DIR = mkdtempSync(join(tmpdir(), "maw-manifest-cache-"));
 const TEST_FLEET_DIR = join(TEST_CONFIG_DIR, "fleet");
 mkdirSync(TEST_FLEET_DIR, { recursive: true });
+mkdirSync(TEST_CACHE_DIR, { recursive: true });
 
 process.env.MAW_CONFIG_DIR = TEST_CONFIG_DIR;
+process.env.MAW_CACHE_DIR = TEST_CACHE_DIR;
 delete process.env.MAW_HOME;
 // MAW_TEST_MODE prevents accidental writes to the real homedir if a test
 // strays. Mirrors test/isolated/auth-secret-persist.test.ts hardening (#820).
@@ -45,15 +49,17 @@ const {
 
 const CONFIG_FILE = join(TEST_CONFIG_DIR, "maw.config.json");
 const ORACLES_JSON = join(TEST_CONFIG_DIR, "oracles.json");
-const ORACLE_BIRTHS_JSON = join(TEST_CONFIG_DIR, "oracle-births.json");
+const ORACLE_BIRTHS_JSON = join(TEST_CACHE_DIR, "oracle-births.json");
 
 afterAll(() => {
   rmSync(TEST_CONFIG_DIR, { recursive: true, force: true });
+  rmSync(TEST_CACHE_DIR, { recursive: true, force: true });
 });
 
 beforeEach(() => {
-  // Wipe all 4 file-backed registries between tests (the 5th — config.agents
-  // pre-population — is recomputed on every loadConfig() call).
+  // Wipe all 5 file-backed registries between tests (config.agents
+  // pre-population is recomputed on every loadConfig() call).
+  mkdirSync(TEST_CACHE_DIR, { recursive: true });
   for (const f of [CONFIG_FILE, ORACLES_JSON, ORACLE_BIRTHS_JSON]) {
     try { rmSync(f, { force: true }); } catch { /* missing is fine */ }
   }
