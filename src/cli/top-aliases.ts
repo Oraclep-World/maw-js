@@ -409,11 +409,10 @@ export async function invokeDirectHandler(
           const windows = String(raw).trim().split("\n").filter(Boolean);
           if (windows.includes(oracleName)) {
             // Exact window name match — bring this window directly.
-            const { maybeSplit, maybeOpenWindow } = await import("../commands/shared/wake-maybe-split");
+            const { maybeSplit } = await import("../commands/shared/wake-maybe-split");
             const windowTarget = `${targetSession}:${oracleName}`;
             log(`\x1b[36m⚡\x1b[0m resolved '${oracleName}' as live tmux window in ${targetSession}`);
             await maybeSplit(windowTarget, { split: true });
-            await maybeOpenWindow(windowTarget, { bring: true });
             delete process.env.MAW_BRING_ANCHOR;
             return;
           }

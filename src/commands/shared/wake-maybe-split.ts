@@ -157,12 +157,17 @@ export async function maybeSplit(target: string, opts: { split?: boolean }): Pro
           return;
         }
       }
-      if (await isClaudeLikeCallerPane(anchor)) {
-        console.log(`  \x1b[33m⚠\x1b[0m --split requested from a Claude Code pane; continuing despite possible redraw smear (#1562).`);
+      // #1816 — when splitting from a Claude TUI pane, use -d (don't focus
+      // the new pane). Keeps the TUI in the foreground during resize so it
+      // gets a clean SIGWINCH redraw instead of the smear cascade (#1562).
+      const isClaudeCaller = await isClaudeLikeCallerPane(anchor);
+      const dontFocus = isClaudeCaller ? "-d " : "";
+      if (isClaudeCaller) {
+        console.log(`  \x1b[36m→\x1b[0m splitting from Claude pane — keeping focus here (-d) to avoid smear.`);
       }
       const targetFlag = anchor ? `-t ${shellArg(anchor)} ` : "";
       const innerCmd = `TMUX= tmux attach-session -t ${shellArg(target)}`;
-      await hostExec(`tmux split-window ${targetFlag}-h -l 50% ${shellArg(innerCmd)}`);
+      await hostExec(`tmux split-window ${dontFocus}${targetFlag}-h -l 50% ${shellArg(innerCmd)}`);
       if (!(await isMawTilePane(anchor))) {
         await restoreSplitLayout(anchor);
       }
