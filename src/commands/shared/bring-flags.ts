@@ -20,17 +20,20 @@
  * Returns a NEW array. Does not mutate. `--to` without a following arg is
  * left intact so the downstream parser surfaces its own error.
  */
-export function translateBringToFlag(argv: string[]): string[] {
+export function translateBringToFlag(argv: string[]): { argv: string[]; anchorWindow?: string } {
   const out: string[] = [];
+  let anchorWindow: string | undefined;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--to" && i + 1 < argv.length) {
-      out.push("--session", argv[++i]!);
+      const { session, window } = parseBringToTarget(argv[++i]!);
+      out.push("--session", session);
+      if (window) anchorWindow = window;
       continue;
     }
     if (arg !== undefined) out.push(arg);
   }
-  return out;
+  return { argv: out, anchorWindow };
 }
 
 /**
@@ -59,6 +62,27 @@ export function translateBringToFlag(argv: string[]): string[] {
  *     mirrors `attach-session -t <session>`, which attaches to whichever
  *     window is currently active in that session — including the caller's.
  */
+/**
+ * #1816 Part 3 — parse a `--to` value that may contain a window component.
+ *
+ *   "--to 50-mawjs"              → { session: "50-mawjs" }
+ *   "--to 50-mawjs:maw-js-1816"  → { session: "50-mawjs", window: "maw-js-1816" }
+ *   "--to mawjs"                 → { session: "mawjs" }
+ *   "--to "                      → { session: "" }
+ *
+ * The window component tells the split layer which pane to split INTO.
+ */
+export type BringToTarget = { session: string; window?: string };
+
+export function parseBringToTarget(value: string): BringToTarget {
+  const colonIdx = value.indexOf(":");
+  if (colonIdx === -1) return { session: value };
+  return {
+    session: value.slice(0, colonIdx),
+    window: value.slice(colonIdx + 1) || undefined,
+  };
+}
+
 export function isSelfBring(target: string, callerSessionWindow: string | null): boolean {
   if (!callerSessionWindow) return false;
   if (!target) return false;

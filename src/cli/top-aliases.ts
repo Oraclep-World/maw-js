@@ -381,14 +381,52 @@ export async function invokeDirectHandler(
       printBringUsage(log);
       return;
     }
-    // #1816 — translate bring-shaped `--to <session>` to wake-shaped
-    // `--session <session>` before dispatching. Pure helper, fixture-tested.
+    // #1816 — translate bring-shaped `--to <session[:window]>` to wake-shaped
+    // `--session <session>`. If --to has a :window suffix, set it as the
+    // split anchor so maybeSplit targets that pane instead of the caller's.
     const { translateBringToFlag } = await import("../commands/shared/bring-flags");
+    const translated = translateBringToFlag(argv);
+    if (translated.anchorWindow) {
+      process.env.MAW_BRING_ANCHOR = translated.anchorWindow;
+    }
+
+    // #1816 Part 4 — before oracle resolution, check if the input name
+    // matches a live tmux window in the target session. Window names are
+    // first-class bring targets (they're visible, named, and addressable).
+    const oracleName = (translated.argv[0] || "").replace(/^-.*/, "");
+    if (oracleName && process.env.TMUX) {
+      const { hostExec } = await import("../sdk");
+      const sessionIdx = translated.argv.indexOf("--session");
+      let targetSession: string | undefined;
+      if (sessionIdx !== -1) targetSession = translated.argv[sessionIdx + 1];
+      if (!targetSession) {
+        try { targetSession = String(await hostExec("tmux display-message -p '#S'")).trim(); }
+        catch { /* not in tmux */ }
+      }
+      if (targetSession) {
+        try {
+          const raw = await hostExec(`tmux list-windows -t '${targetSession}' -F '#{window_name}'`);
+          const windows = String(raw).trim().split("\n").filter(Boolean);
+          if (windows.includes(oracleName)) {
+            // Exact window name match — bring this window directly.
+            const { maybeSplit, maybeOpenWindow } = await import("../commands/shared/wake-maybe-split");
+            const windowTarget = `${targetSession}:${oracleName}`;
+            log(`\x1b[36m⚡\x1b[0m resolved '${oracleName}' as live tmux window in ${targetSession}`);
+            await maybeSplit(windowTarget, { split: true });
+            await maybeOpenWindow(windowTarget, { bring: true });
+            delete process.env.MAW_BRING_ANCHOR;
+            return;
+          }
+        } catch { /* tmux query failed — fall through to wake path */ }
+      }
+    }
+
     await invokeDirectHandler(
       "../commands/shared/wake-cmd:cmdWake",
-      [...translateBringToFlag(argv), "--split"],
+      [...translated.argv, "--split"],
       deps,
     );
+    delete process.env.MAW_BRING_ANCHOR;
     return;
   }
 

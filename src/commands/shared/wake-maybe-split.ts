@@ -123,7 +123,26 @@ export async function maybeSplit(target: string, opts: { split?: boolean }): Pro
   if (!opts.split) return;
   if (process.env.TMUX) {
     try {
-      const anchor = process.env.TMUX_PANE;
+      // #1816 Part 3 — MAW_BRING_ANCHOR overrides the split target to a
+      // specific window (from `--to session:window`). Resolve the window
+      // name to a pane ID so the split lands THERE instead of in the
+      // caller's pane.
+      const bringAnchor = process.env.MAW_BRING_ANCHOR;
+      let anchor: string | undefined;
+      if (bringAnchor) {
+        const session = target.split(":")[0] || target;
+        try {
+          const paneId = await hostExec(
+            `tmux list-panes -t ${shellArg(session + ":" + bringAnchor)} -F '#{pane_id}' | head -1`,
+          );
+          anchor = String(paneId).trim() || process.env.TMUX_PANE;
+          console.log(`  \x1b[36m→\x1b[0m split anchor: ${bringAnchor} (${anchor})`);
+        } catch {
+          anchor = process.env.TMUX_PANE;
+        }
+      } else {
+        anchor = process.env.TMUX_PANE;
+      }
       // #1816 — refuse to split-bring an oracle into its own pane. A child
       // pane that attach-sessions back to its own parent session creates
       // nested-attach + amplifies the #1562 redraw smear into a persistent

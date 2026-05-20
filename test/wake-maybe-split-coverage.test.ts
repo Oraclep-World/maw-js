@@ -44,6 +44,9 @@ mock.module(join(import.meta.dir, "../src/sdk"), () => ({
     if (cmd.includes("#{pane_id}|#{pane_top}|#{pane_left}|#{@maw_tile}")) {
       return paneGeometryResponse;
     }
+    if (cmd.includes("list-panes") && cmd.includes("#{pane_id}") && !cmd.includes("#{pane_top}")) {
+      return "%99\n";
+    }
     if (cmd.includes("list-panes") && cmd.includes("wc -l")) {
       if (throwOnLayoutProbe) throw new Error("layout probe failed");
       return listPanesResponse;
