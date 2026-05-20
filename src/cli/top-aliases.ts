@@ -140,10 +140,12 @@ export function parseBringArgs(
 }
 
 function printBringUsage(write: (line: string) => void = console.log): void {
-  write("usage: maw bring <oracle> [wake flags...]");
-  write("       maw b <oracle> [wake flags...]");
+  write("usage: maw bring <oracle> [--to <session>] [wake flags...]");
+  write("       maw b <oracle> [--to <session>] [wake flags...]");
   write("  Thin alias: maw bring <oracle> ≡ maw wake <oracle> --split");
   write("  Supports the same flags as `maw wake`, including --task, --wt, --dry-run, and -e/--engine.");
+  write("  --to <session> is an alias for --session that reads naturally with the bring verb (#1816).");
+  write("  Refuses to split-bring an oracle into its own pane (set MAW_ALLOW_SELF_BRING=1 to override).");
 }
 
 function printWakeAliasUsage(verb: "wake" | "awake", write: (line: string) => void = console.log): void {
@@ -379,7 +381,14 @@ export async function invokeDirectHandler(
       printBringUsage(log);
       return;
     }
-    await invokeDirectHandler("../commands/shared/wake-cmd:cmdWake", [...argv, "--split"], deps);
+    // #1816 — translate bring-shaped `--to <session>` to wake-shaped
+    // `--session <session>` before dispatching. Pure helper, fixture-tested.
+    const { translateBringToFlag } = await import("../commands/shared/bring-flags");
+    await invokeDirectHandler(
+      "../commands/shared/wake-cmd:cmdWake",
+      [...translateBringToFlag(argv), "--split"],
+      deps,
+    );
     return;
   }
 

@@ -1,5 +1,25 @@
 import { hostExec } from "../../sdk";
 import { isClaudeLikePane } from "../plugins/tmux/safety";
+import { isSelfBring } from "./bring-flags";
+
+/**
+ * #1816 — read the caller's pane address as "session:window" from tmux.
+ * Returns null when not in tmux or the lookup fails (we proceed without
+ * the self-bring check — fail open, since the existing behavior was no
+ * check at all).
+ */
+async function readCallerSessionWindow(anchor: string | undefined): Promise<string | null> {
+  if (!anchor) return null;
+  try {
+    const raw = await hostExec(
+      `tmux display-message -p -t ${shellArg(anchor)} '#{session_name}:#{window_name}'`,
+    );
+    const out = String(raw).trim();
+    return out.length > 0 ? out : null;
+  } catch {
+    return null;
+  }
+}
 
 function shellArg(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
@@ -104,6 +124,20 @@ export async function maybeSplit(target: string, opts: { split?: boolean }): Pro
   if (process.env.TMUX) {
     try {
       const anchor = process.env.TMUX_PANE;
+      // #1816 — refuse to split-bring an oracle into its own pane. A child
+      // pane that attach-sessions back to its own parent session creates
+      // nested-attach + amplifies the #1562 redraw smear into a persistent
+      // loop. MAW_ALLOW_SELF_BRING=1 overrides for diagnostic use.
+      if (process.env.MAW_ALLOW_SELF_BRING !== "1") {
+        const callerSW = await readCallerSessionWindow(anchor);
+        if (isSelfBring(target, callerSW)) {
+          console.log(`  \x1b[31m✗\x1b[0m refusing to split-bring oracle into its own pane (#1816 — would loop).`);
+          console.log(`      \x1b[90mtarget:           ${target}\x1b[0m`);
+          console.log(`      \x1b[90mcaller pane:      ${callerSW}\x1b[0m`);
+          console.log(`      \x1b[90mto override:      MAW_ALLOW_SELF_BRING=1 maw bring ...\x1b[0m`);
+          return;
+        }
+      }
       if (await isClaudeLikeCallerPane(anchor)) {
         console.log(`  \x1b[33m⚠\x1b[0m --split requested from a Claude Code pane; continuing despite possible redraw smear (#1562).`);
       }

@@ -16,6 +16,7 @@ let throwOnTileProbe = false;
 let throwOnRespawn = false;
 let throwOnNewWindow = false;
 let paneCommandResponse = "zsh";
+let paneSessionWindowResponse = "";
 
 mock.module(join(import.meta.dir, "../src/sdk"), () => ({
   ...realSdk,
@@ -23,6 +24,7 @@ mock.module(join(import.meta.dir, "../src/sdk"), () => ({
     if (!active) return realSdk.hostExec(cmd, ...(args as []));
     hostExecCalls.push(cmd);
     if (cmd.includes("pane_current_command")) return paneCommandResponse;
+    if (cmd.includes("session_name") && cmd.includes("window_name")) return paneSessionWindowResponse;
     if (cmd === "tmux display-message -p '#S'") {
       if (!probeServerUp) throw new Error("no tmux server");
       return "work";
@@ -92,6 +94,8 @@ describe("wake maybe split/window coverage", () => {
     throwOnRespawn = false;
     throwOnNewWindow = false;
     paneCommandResponse = "zsh";
+    paneSessionWindowResponse = "";
+    delete process.env.MAW_ALLOW_SELF_BRING;
     resetEnv(true);
     console.log = (...args: unknown[]) => logs.push(args.join(" "));
   });
@@ -120,23 +124,60 @@ describe("wake maybe split/window coverage", () => {
     process.env.TMUX_PANE = "%4'2";
     await maybeSplit("20-homekeeper:homekeeper-oracle", { split: true });
 
-    expect(hostExecCalls[0]).toContain("pane_current_command");
-    expect(hostExecCalls[1]).toContain("tmux split-window -t '%4'\\''2' -h -l 50%");
-    expect(hostExecCalls[1]).toContain("TMUX= tmux attach-session -t");
-    expect(hostExecCalls[2]).toContain("show-options -p -t '%4'\\''2'");
-    expect(hostExecCalls[3]).toContain("list-panes -t '%4'\\''2'");
-    expect(hostExecCalls[4]).toContain("select-layout -t '%4'\\''2' main-vertical");
-    expect(hostExecCalls[5]).toBe("tmux refresh-client -S");
+    // #1816 — self-bring guard reads caller's session:window first (mock returns "" → no match → proceed).
+    expect(hostExecCalls[0]).toContain("session_name}:#{window_name");
+    expect(hostExecCalls[1]).toContain("pane_current_command");
+    expect(hostExecCalls[2]).toContain("tmux split-window -t '%4'\\''2' -h -l 50%");
+    expect(hostExecCalls[2]).toContain("TMUX= tmux attach-session -t");
+    expect(hostExecCalls[3]).toContain("show-options -p -t '%4'\\''2'");
+    expect(hostExecCalls[4]).toContain("list-panes -t '%4'\\''2'");
+    expect(hostExecCalls[5]).toContain("select-layout -t '%4'\\''2' main-vertical");
+    expect(hostExecCalls[6]).toBe("tmux refresh-client -S");
     expect(output()).toContain("✓ split beside — 20-homekeeper:homekeeper-oracle (50%)");
   });
 
+
+  test("#1816 — split refuses when target equals caller's session:window (self-bring loop guard)", async () => {
+    paneSessionWindowResponse = "20-homekeeper:homekeeper-oracle";
+
+    await maybeSplit("20-homekeeper:homekeeper-oracle", { split: true });
+
+    // First call: session:window probe. No further tmux side-effects.
+    expect(hostExecCalls).toHaveLength(1);
+    expect(hostExecCalls[0]).toBe("tmux display-message -p -t '%42' '#{session_name}:#{window_name}'");
+    expect(output()).toContain("refusing to split-bring oracle into its own pane");
+    expect(output()).toContain("MAW_ALLOW_SELF_BRING=1");
+    expect(output()).not.toContain("✓ split beside");
+  });
+
+  test("#1816 — MAW_ALLOW_SELF_BRING=1 overrides the self-bring guard", async () => {
+    paneSessionWindowResponse = "20-homekeeper:homekeeper-oracle";
+    process.env.MAW_ALLOW_SELF_BRING = "1";
+
+    await maybeSplit("20-homekeeper:homekeeper-oracle", { split: true });
+
+    expect(hostExecCalls.some(cmd => cmd.includes("tmux split-window -t '%42' -h -l 50%"))).toBe(true);
+    expect(output()).toContain("✓ split beside");
+    expect(output()).not.toContain("refusing to split-bring");
+  });
+
+  test("#1816 — different target window in same session is NOT self-bring", async () => {
+    paneSessionWindowResponse = "20-homekeeper:homekeeper-oracle";
+
+    await maybeSplit("20-homekeeper:homekeeper-bridge", { split: true });
+
+    expect(output()).not.toContain("refusing to split-bring");
+    expect(output()).toContain("✓ split beside");
+  });
 
   test("split warns but continues from Claude-like caller panes when explicitly requested (#1562)", async () => {
     paneCommandResponse = "2.1.139";
 
     await maybeSplit("20-homekeeper:homekeeper-oracle", { split: true });
 
-    expect(hostExecCalls[0]).toBe("tmux display-message -p -t '%42' '#{pane_current_command}'");
+    // #1816 — self-bring guard runs first (mock falls through, returns "" → null → proceed).
+    expect(hostExecCalls[0]).toBe("tmux display-message -p -t '%42' '#{session_name}:#{window_name}'");
+    expect(hostExecCalls[1]).toBe("tmux display-message -p -t '%42' '#{pane_current_command}'");
     expect(hostExecCalls.some(cmd => cmd.includes("tmux split-window -t '%42' -h -l 50%"))).toBe(true);
     expect(output()).toContain("--split requested from a Claude Code pane; continuing despite possible redraw smear");
     expect(output()).toContain("✓ split beside — 20-homekeeper:homekeeper-oracle (50%)");
