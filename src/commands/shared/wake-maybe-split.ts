@@ -157,17 +157,22 @@ export async function maybeSplit(target: string, opts: { split?: boolean }): Pro
           return;
         }
       }
-      // #1816 — when splitting from a Claude TUI pane, use -d (don't focus
-      // the new pane). Keeps the TUI in the foreground during resize so it
-      // gets a clean SIGWINCH redraw instead of the smear cascade (#1562).
+      // #1816 — Claude Code's TUI smears on any pane resize (SIGWINCH).
+      // split-window resizes → smear. Unfixable from maw-js (#1562 upstream).
+      // When caller is a Claude TUI: skip split, open background tab instead.
+      // User switches tabs manually — no smear, correct target.
       const isClaudeCaller = await isClaudeLikeCallerPane(anchor);
-      const dontFocus = isClaudeCaller ? "-d " : "";
-      if (isClaudeCaller) {
-        console.log(`  \x1b[36m→\x1b[0m splitting from Claude pane — keeping focus here (-d) to avoid smear.`);
+      if (isClaudeCaller && process.env.MAW_FORCE_SPLIT !== "1") {
+        const session = target.split(":")[0] || target;
+        await openBackgroundTab(target);
+        console.log(`  \x1b[36m→\x1b[0m opened as background tab (split skipped — Claude TUI pane would smear #1562).`);
+        console.log(`      \x1b[90mswitch:           Ctrl-B n  or  tmux select-window -t ${session}:${target.split(":")[1] || target}\x1b[0m`);
+        console.log(`      \x1b[90mforce split:      MAW_FORCE_SPLIT=1 maw bring ...\x1b[0m`);
+        return;
       }
       const targetFlag = anchor ? `-t ${shellArg(anchor)} ` : "";
       const innerCmd = `TMUX= tmux attach-session -t ${shellArg(target)}`;
-      await hostExec(`tmux split-window ${dontFocus}${targetFlag}-h -l 50% ${shellArg(innerCmd)}`);
+      await hostExec(`tmux split-window ${targetFlag}-h -l 50% ${shellArg(innerCmd)}`);
       if (!(await isMawTilePane(anchor))) {
         await restoreSplitLayout(anchor);
       }
