@@ -2,12 +2,16 @@ import { beforeEach, describe, expect, mock, test } from "bun:test";
 import { mockConfigModule } from "../helpers/mock-config";
 import type { DiscoveryError, DiscoveryResponse } from "../../src/vendor/mpr-plugins/peers/discovered";
 import type { LoadedPlugin } from "../../src/plugin/types";
+import type { FleetEntry } from "../../src/commands/shared/fleet-load";
+import type { OracleManifestEntry } from "../../src/lib/oracle-manifest";
 
 const configPath = import.meta.resolve("../../src/config");
 const discoveredPath = import.meta.resolve("../../src/vendor/mpr-plugins/peers/discovered");
 const liveStatePath = import.meta.resolve("../../src/commands/shared/discover-live-state");
 const registryPath = import.meta.resolve("../../src/plugin/registry");
 const repoDiscoveryPath = import.meta.resolve("../../src/core/repo-discovery");
+const fleetLoadPath = import.meta.resolve("../../src/commands/shared/fleet-load");
+const oracleManifestPath = import.meta.resolve("../../src/lib/oracle-manifest");
 
 let configValue: Record<string, unknown> = {};
 let discoveryResult: DiscoveryResponse | DiscoveryError;
@@ -33,6 +37,10 @@ let pluginRows: LoadedPlugin[] = [];
 let pluginError: Error | null = null;
 let ghqPaths: string[] = [];
 let ghqError: Error | null = null;
+let fleetEntries: FleetEntry[] = [];
+let fleetError: Error | null = null;
+let manifestRows: OracleManifestEntry[] = [];
+let manifestError: Error | null = null;
 
 mock.module(configPath, () => ({
   ...mockConfigModule(() => configValue as never),
@@ -86,6 +94,20 @@ mock.module(repoDiscoveryPath, () => ({
   }),
 }));
 
+mock.module(fleetLoadPath, () => ({
+  loadFleetEntries: () => {
+    if (fleetError) throw fleetError;
+    return fleetEntries;
+  },
+}));
+
+mock.module(oracleManifestPath, () => ({
+  loadManifestCached: () => {
+    if (manifestError) throw manifestError;
+    return manifestRows;
+  },
+}));
+
 const { command, default: handler } = await import("../../src/commands/plugins/discover/index.ts?discover-plugin-peer-sources");
 
 function discovery(url: string, node = "scout-node"): DiscoveryResponse {
@@ -130,6 +152,32 @@ function plugin(name: string, overrides: Partial<LoadedPlugin> = {}): LoadedPlug
   };
 }
 
+function fleetEntry(name: string, windows: FleetEntry["session"]["windows"], overrides: Partial<FleetEntry> = {}): FleetEntry {
+  return {
+    file: `50-${name}.json`,
+    num: 50,
+    groupName: name,
+    session: {
+      name: `50-${name}`,
+      windows,
+    },
+    ...overrides,
+  };
+}
+
+function oracle(name: string, overrides: Partial<OracleManifestEntry> = {}): OracleManifestEntry {
+  return {
+    name,
+    sources: ["oracles-json"],
+    repo: `Soul-Brews-Studio/${name}-oracle`,
+    localPath: `/opt/Code/github.com/Soul-Brews-Studio/${name}-oracle`,
+    hasPsi: true,
+    hasFleetConfig: false,
+    isLive: false,
+    ...overrides,
+  };
+}
+
 beforeEach(() => {
   configValue = {
     peers: ["http://config:3456"],
@@ -158,6 +206,10 @@ beforeEach(() => {
   pluginError = null;
   ghqPaths = [];
   ghqError = null;
+  fleetEntries = [];
+  fleetError = null;
+  manifestRows = [];
+  manifestError = null;
 });
 
 describe("discover plugin peer-source integration (#1808, #1831)", () => {
@@ -204,6 +256,16 @@ describe("discover plugin peer-source integration (#1808, #1831)", () => {
     expect(parsed.live.sessions[0].name).toBe("101-mawjs");
     expect(parsed.plugins).toEqual({
       source: "plugin-registry",
+      total: 0,
+      records: [],
+    });
+    expect(parsed.fleet).toEqual({
+      source: "fleet-config",
+      total: 0,
+      records: [],
+    });
+    expect(parsed.oracles).toEqual({
+      source: "oracle-manifest",
       total: 0,
       records: [],
     });
@@ -277,6 +339,191 @@ describe("discover plugin peer-source integration (#1808, #1831)", () => {
       capabilities: ["sdk:identity"],
       dependencies: ["base"],
     }]);
+  });
+
+  test("includes deduped fleet config workspaces in JSON and tree output", async () => {
+    configValue = {
+      namedPeers: [
+        { name: "m5", url: "http://m5:3456" },
+        { name: "white", url: "http://white:3456" },
+      ],
+      agents: {
+        "mawjs-oracle": "m5",
+        "white-oracle": "white",
+      },
+      node: "m5",
+    };
+    fleetEntries = [
+      fleetEntry("mawjs", [
+        { name: "mawjs-oracle", repo: "Soul-Brews-Studio/maw-js" },
+        { name: "white-oracle", repo: "Soul-Brews-Studio/white-oracle" },
+      ]),
+      fleetEntry("mawjs-dupe", [
+        { name: "mawjs-oracle", repo: "Soul-Brews-Studio/maw-js" },
+      ], { file: "51-mawjs-dupe.json", num: 51, groupName: "mawjs-dupe" }),
+    ];
+
+    const result = await handler({ source: "cli", args: ["--peers", "config", "--tree", "--json"] } as any);
+
+    expect(result.ok).toBe(true);
+    const parsed = JSON.parse(result.output ?? "{}");
+    expect(parsed.fleet.total).toBe(2);
+    expect(parsed.fleet.records).toEqual([
+      {
+        source: "fleet-config",
+        type: "workspace",
+        file: "50-mawjs.json",
+        slot: 50,
+        groupName: "mawjs",
+        session: "50-mawjs",
+        name: "mawjs-oracle",
+        repo: "Soul-Brews-Studio/maw-js",
+        node: "m5",
+        endpoint: "http://m5:3456",
+        peerMatched: true,
+      },
+      {
+        source: "fleet-config",
+        type: "workspace",
+        file: "50-mawjs.json",
+        slot: 50,
+        groupName: "mawjs",
+        session: "50-mawjs",
+        name: "white-oracle",
+        repo: "Soul-Brews-Studio/white-oracle",
+        node: "white",
+        endpoint: "http://white:3456",
+        peerMatched: true,
+      },
+    ]);
+    expect(parsed.tree.fleet.map((record: { name: string }) => record.name)).toEqual(["mawjs-oracle", "white-oracle"]);
+  });
+
+  test("renders fleet config text with configured-but-offline workspaces", async () => {
+    configValue = {
+      peers: [],
+      namedPeers: [],
+      agents: { "offline-oracle": "white" },
+    };
+    fleetEntries = [fleetEntry("offline", [{ name: "offline-oracle", repo: "Soul-Brews-Studio/offline-oracle" }])];
+
+    const result = await handler({ source: "cli", args: ["--peers=config"] } as any);
+
+    expect(result.ok).toBe(true);
+    expect(result.output).toContain("fleet config");
+    expect(result.output).toContain("offline-oracle");
+    expect(result.output).toContain("offline");
+  });
+
+  test("includes registered oracle inventory joined with ghq, fleet, and peers", async () => {
+    configValue = {
+      namedPeers: [{ name: "mawjs", url: "http://m5:3456" }],
+      agents: { "mawjs-oracle": "m5" },
+    };
+    ghqPaths = ["/opt/Code/github.com/Soul-Brews-Studio/maw-js"];
+    fleetEntries = [fleetEntry("mawjs", [{ name: "mawjs-oracle", repo: "Soul-Brews-Studio/maw-js" }])];
+    manifestRows = [
+      oracle("mawjs", {
+        sources: ["fleet", "agent", "oracles-json"],
+        node: "m5",
+        session: "50-mawjs",
+        window: "mawjs-oracle",
+        repo: "Soul-Brews-Studio/maw-js",
+        localPath: "/opt/Code/github.com/Soul-Brews-Studio/maw-js",
+        hasFleetConfig: true,
+      }),
+    ];
+
+    const result = await handler({ source: "cli", args: ["--peers", "config", "--json"] } as any);
+
+    expect(result.ok).toBe(true);
+    const parsed = JSON.parse(result.output ?? "{}");
+    expect(parsed.oracles.total).toBe(1);
+    expect(parsed.oracles.records).toEqual([{
+      source: "oracle-manifest",
+      type: "oracle",
+      name: "mawjs",
+      sources: ["fleet", "agent", "oracles-json"],
+      node: "m5",
+      session: "50-mawjs",
+      window: "mawjs-oracle",
+      repo: "Soul-Brews-Studio/maw-js",
+      localPath: "/opt/Code/github.com/Soul-Brews-Studio/maw-js",
+      hasPsi: true,
+      hasFleetConfig: true,
+      awake: false,
+      ghqPath: "/opt/Code/github.com/Soul-Brews-Studio/maw-js",
+      worktree: false,
+      fleetMatched: true,
+      peerUrls: ["http://m5:3456"],
+    }]);
+  });
+
+  test("dedupes duplicate registered oracle rows and joins tmux evidence in tree output", async () => {
+    manifestRows = [
+      oracle("mawjs", { sources: ["oracles-json"], window: "mawjs-oracle" }),
+      oracle("mawjs", { sources: ["fleet"], window: "mawjs-oracle" }),
+    ];
+    liveStateResult = {
+      source: "tmux",
+      live: [{
+        source: "tmux",
+        id: "%9",
+        target: "50-mawjs:mawjs-oracle.0",
+        session: "50-mawjs",
+        window: "mawjs-oracle",
+        pane: "0",
+        command: "claude",
+        awake: true,
+        matches: ["mawjs"],
+      }],
+      warnings: [],
+    };
+
+    const result = await handler({ source: "cli", args: ["--peers", "config", "--tree", "--json"] } as any);
+
+    expect(result.ok).toBe(true);
+    const parsed = JSON.parse(result.output ?? "{}");
+    expect(parsed.oracles.total).toBe(1);
+    expect(parsed.tree.oracles).toHaveLength(1);
+    expect(parsed.tree.oracles[0].awake).toBe(true);
+  });
+
+  test("joins registered oracles to ghq by repo slug and oracle name variants", async () => {
+    ghqPaths = [
+      "/opt/Code/github.com/Soul-Brews-Studio/repo-join",
+      "/opt/Code/github.com/Soul-Brews-Studio/variant-oracle",
+    ];
+    manifestRows = [
+      oracle("repojoin", {
+        repo: "Soul-Brews-Studio/repo-join",
+        localPath: undefined,
+      }),
+      oracle("variant", {
+        repo: undefined,
+        localPath: undefined,
+      }),
+    ];
+
+    const result = await handler({ source: "cli", args: ["--peers", "config", "--json"] } as any);
+
+    expect(result.ok).toBe(true);
+    const parsed = JSON.parse(result.output ?? "{}");
+    expect(parsed.oracles.records.map((record: { ghqPath?: string }) => record.ghqPath)).toEqual([
+      "/opt/Code/github.com/Soul-Brews-Studio/repo-join",
+      "/opt/Code/github.com/Soul-Brews-Studio/variant-oracle",
+    ]);
+  });
+
+  test("renders registered oracle inventory in text output", async () => {
+    manifestRows = [oracle("mother")];
+
+    const result = await handler({ source: "cli", args: ["--peers=config"] } as any);
+
+    expect(result.ok).toBe(true);
+    expect(result.output).toContain("registered oracles");
+    expect(result.output).toContain("mother");
+    expect(result.output).toContain("oracles-json");
   });
 
   test("renders plugin registry in text output", async () => {
@@ -390,6 +637,16 @@ describe("discover plugin peer-source integration (#1808, #1831)", () => {
       total: 0,
       records: [],
     });
+    expect(parsed.fleet).toEqual({
+      source: "fleet-config",
+      total: 0,
+      records: [],
+    });
+    expect(parsed.oracles).toEqual({
+      source: "oracle-manifest",
+      total: 0,
+      records: [],
+    });
     expect(parsed.ghq).toEqual({
       source: "ghq",
       total: 0,
@@ -412,10 +669,40 @@ describe("discover plugin peer-source integration (#1808, #1831)", () => {
   test("renders tree text with plugin and ghq live inventory rows", async () => {
     pluginRows = [plugin("handover", { disabled: true })];
     ghqPaths = ["/opt/Code/github.com/Soul-Brews-Studio/mother-oracle.wt-review"];
+    configValue = {
+      namedPeers: [{ name: "m5", url: "http://m5:3456" }],
+      agents: { "handover-oracle": "m5" },
+    };
+    fleetEntries = [fleetEntry("handover", [{ name: "handover-oracle", repo: "Soul-Brews-Studio/handover-oracle" }])];
+    manifestRows = [
+      oracle("mother", {
+        repo: "Soul-Brews-Studio/mother-oracle",
+        localPath: "/opt/Code/github.com/Soul-Brews-Studio/mother-oracle.wt-review",
+      }),
+    ];
+    liveStateResult = {
+      source: "tmux",
+      live: [{
+        source: "tmux",
+        id: "%8",
+        target: "50-mother:mother-oracle.0",
+        session: "50-mother",
+        window: "mother-oracle",
+        pane: "0",
+        command: "claude",
+        awake: true,
+        matches: ["mother"],
+      }],
+      warnings: [],
+    };
 
     const result = await handler({ source: "cli", args: ["--peers", "config", "--tree"] } as any);
 
     expect(result.ok).toBe(true);
+    expect(result.output).toContain("fleet config (1 configured)");
+    expect(result.output).toContain("m5/handover-oracle 50-handover endpoint=http://m5:3456 repo=Soul-Brews-Studio/handover-oracle");
+    expect(result.output).toContain("registered oracles (1)");
+    expect(result.output).toContain("mother awake sources=oracles-json repo=Soul-Brews-Studio/mother-oracle ghq=/opt/Code/github.com/Soul-Brews-Studio/mother-oracle.wt-review");
     expect(result.output).toContain("plugins (1 registered)");
     expect(result.output).toContain("handover@1.2.3 ts/standard command=handover disabled");
     expect(result.output).toContain("ghq (1 repos)");
@@ -470,6 +757,26 @@ describe("discover plugin peer-source integration (#1808, #1831)", () => {
     expect(result.ok).toBe(true);
     expect(result.output).toContain("plugins (0 registered)");
     expect(result.output).toContain("warning: plugin registry unavailable (bad registry)");
+  });
+
+  test("renders fleet config warnings in tree output without crashing", async () => {
+    fleetError = new Error("fleet missing");
+
+    const result = await handler({ source: "cli", args: ["--peers", "config", "--tree"] } as any);
+
+    expect(result.ok).toBe(true);
+    expect(result.output).toContain("fleet config (0 configured)");
+    expect(result.output).toContain("warning: fleet config unavailable (fleet missing)");
+  });
+
+  test("renders oracle registry warnings in tree output without crashing", async () => {
+    manifestError = new Error("manifest missing");
+
+    const result = await handler({ source: "cli", args: ["--peers", "config", "--tree"] } as any);
+
+    expect(result.ok).toBe(true);
+    expect(result.output).toContain("registered oracles (0)");
+    expect(result.output).toContain("warning: oracle registry unavailable (manifest missing)");
   });
 
   test("renders ghq warnings in tree output without crashing", async () => {

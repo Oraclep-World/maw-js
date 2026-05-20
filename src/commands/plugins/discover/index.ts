@@ -1,8 +1,11 @@
 import type { InvokeContext, InvokeResult } from "../../../plugin/types";
-import { loadConfig } from "../../../config";
+import { loadConfig, type MawConfig } from "../../../config";
 import { getRepos } from "../../../core/repo-discovery";
+import { loadManifestCached } from "../../../lib/oracle-manifest";
+import type { OracleManifestEntry, OracleManifestSource } from "../../../lib/oracle-manifest";
 import { discoverPackages } from "../../../plugin/registry";
 import type { LoadedPlugin } from "../../../plugin/types";
+import { loadFleetEntries, type FleetEntry } from "../../shared/fleet-load";
 import {
   formatTmuxLiveState,
   markPeerTargetsLive,
@@ -14,6 +17,7 @@ import {
 import {
   formatPeerSources,
   type PeerSourceResult,
+  type PeerTarget,
   parsePeerSourceMode,
   resolvePeerSources,
 } from "../../shared/peer-sources";
@@ -120,6 +124,57 @@ interface GhqState {
   warnings: string[];
 }
 
+interface FleetConfigRecord {
+  source: "fleet-config";
+  type: "workspace";
+  file: string;
+  slot: number;
+  groupName: string;
+  session: string;
+  name: string;
+  repo?: string;
+  node: string;
+  endpoint?: string;
+  peerMatched: boolean;
+}
+
+interface FleetConfigState {
+  source: "fleet-config";
+  total: number;
+  records: FleetConfigRecord[];
+  warnings: string[];
+}
+
+interface RegisteredOracleRecord {
+  source: "oracle-manifest";
+  type: "oracle";
+  name: string;
+  sources: OracleManifestSource[];
+  node?: string;
+  session?: string;
+  window?: string;
+  repo?: string;
+  localPath?: string;
+  sessionId?: string;
+  hasPsi?: boolean;
+  hasFleetConfig?: boolean;
+  buddedFrom?: string | null;
+  buddedAt?: string | null;
+  born?: OracleManifestEntry["born"];
+  awake: boolean;
+  ghqPath?: string;
+  worktree: boolean;
+  fleetMatched: boolean;
+  peerUrls: string[];
+}
+
+interface OracleRegistrationState {
+  source: "oracle-manifest";
+  total: number;
+  records: RegisteredOracleRecord[];
+  warnings: string[];
+}
+
 function liveJsonState(live: TmuxLiveStateResult): LiveJsonState {
   return {
     source: live.source,
@@ -205,6 +260,164 @@ async function loadGhqState(): Promise<GhqState> {
   }
 }
 
+function peerIdentityKeys(peer: PeerTarget): string[] {
+  return [peer.name, peer.node, peer.oracle].filter((value): value is string => typeof value === "string" && value.length > 0);
+}
+
+function endpointForNode(node: string, peers: PeerTarget[]): PeerTarget | undefined {
+  return peers.find((peer) => peerIdentityKeys(peer).includes(node));
+}
+
+function fleetWindowNode(config: MawConfig, name: string): string {
+  return config.agents?.[name] ?? config.node ?? "local";
+}
+
+function fleetRecord(config: MawConfig, entry: FleetEntry, window: { name?: string; repo?: string }, peers: PeerTarget[]): FleetConfigRecord | null {
+  if (!window.name) return null;
+  const node = fleetWindowNode(config, window.name);
+  const peer = endpointForNode(node, peers);
+  return {
+    source: "fleet-config",
+    type: "workspace",
+    file: entry.file,
+    slot: entry.num,
+    groupName: entry.groupName,
+    session: entry.session.name,
+    name: window.name,
+    repo: window.repo,
+    node,
+    endpoint: peer?.url,
+    peerMatched: Boolean(peer),
+  };
+}
+
+function loadFleetConfigState(config: MawConfig, peers: PeerTarget[]): FleetConfigState {
+  try {
+    const seen = new Set<string>();
+    const records: FleetConfigRecord[] = [];
+    for (const entry of loadFleetEntries()) {
+      for (const window of entry.session.windows ?? []) {
+        const record = fleetRecord(config, entry, window, peers);
+        if (!record) continue;
+        const key = `${record.node}\0${record.name}\0${record.repo ?? ""}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        records.push(record);
+      }
+    }
+    return {
+      source: "fleet-config",
+      total: records.length,
+      records,
+      warnings: [],
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      source: "fleet-config",
+      total: 0,
+      records: [],
+      warnings: [`fleet config unavailable (${message})`],
+    };
+  }
+}
+
+function oracleNameVariants(name: string): string[] {
+  return [name, `${name}-oracle`];
+}
+
+function ghqRecordMatchesOracle(repo: GhqRepoRecord, oracle: OracleManifestEntry): boolean {
+  if (oracle.localPath && normalizeRepoPath(oracle.localPath).toLowerCase() === repo.path.toLowerCase()) return true;
+  if (oracle.repo && `${repo.owner ?? ""}/${repo.name}`.toLowerCase() === oracle.repo.toLowerCase()) return true;
+  return oracleNameVariants(oracle.name).some((variant) => repo.name.toLowerCase() === variant.toLowerCase());
+}
+
+function fleetRecordMatchesOracle(record: FleetConfigRecord, oracle: OracleManifestEntry): boolean {
+  return oracleNameVariants(oracle.name).some((variant) => record.name === variant || record.session.endsWith(`-${variant}`));
+}
+
+function peerMatchesOracle(peer: PeerTarget, oracle: OracleManifestEntry): boolean {
+  const variants = oracleNameVariants(oracle.name);
+  return peerIdentityKeys(peer).some((key) => variants.includes(key) || key === oracle.name);
+}
+
+function liveMatchesOracle(live: TmuxLiveStateResult | undefined, oracle: OracleManifestEntry): boolean {
+  if (!live) return oracle.isLive === true;
+  const variants = oracleNameVariants(oracle.name);
+  for (const pane of live.live) {
+    if (oracle.session && pane.session === oracle.session) return true;
+    if (oracle.window && pane.window === oracle.window) return true;
+    if (variants.includes(pane.window)) return true;
+    if (pane.matches.some((match) => variants.includes(match) || match === oracle.name)) return true;
+  }
+  return oracle.isLive === true;
+}
+
+function registeredOracleRecord(
+  oracle: OracleManifestEntry,
+  ghq: GhqState,
+  fleet: FleetConfigState,
+  peers: PeerTarget[],
+  live?: TmuxLiveStateResult,
+): RegisteredOracleRecord {
+  const ghqMatch = ghq.repos.find((repo) => ghqRecordMatchesOracle(repo, oracle));
+  const peerUrls = peers.filter((peer) => peerMatchesOracle(peer, oracle)).map((peer) => peer.url);
+  return {
+    source: "oracle-manifest",
+    type: "oracle",
+    name: oracle.name,
+    sources: oracle.sources,
+    node: oracle.node,
+    session: oracle.session,
+    window: oracle.window,
+    repo: oracle.repo,
+    localPath: oracle.localPath,
+    sessionId: oracle.sessionId,
+    hasPsi: oracle.hasPsi,
+    hasFleetConfig: oracle.hasFleetConfig,
+    buddedFrom: oracle.buddedFrom,
+    buddedAt: oracle.buddedAt,
+    born: oracle.born,
+    awake: liveMatchesOracle(live, oracle),
+    ghqPath: ghqMatch?.path,
+    worktree: ghqMatch?.worktree ?? false,
+    fleetMatched: fleet.records.some((record) => fleetRecordMatchesOracle(record, oracle)),
+    peerUrls: [...new Set(peerUrls)],
+  };
+}
+
+function loadOracleRegistrationState(
+  ghq: GhqState,
+  fleet: FleetConfigState,
+  peers: PeerTarget[],
+  live?: TmuxLiveStateResult,
+): OracleRegistrationState {
+  try {
+    const seen = new Set<string>();
+    const records: RegisteredOracleRecord[] = [];
+    for (const oracle of loadManifestCached()) {
+      const key = oracle.name.toLowerCase();
+      if (!oracle.name || seen.has(key)) continue;
+      seen.add(key);
+      records.push(registeredOracleRecord(oracle, ghq, fleet, peers, live));
+    }
+    return {
+      source: "oracle-manifest",
+      total: records.length,
+      records,
+      warnings: [],
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      source: "oracle-manifest",
+      total: 0,
+      records: [],
+      warnings: [`oracle registry unavailable (${message})`],
+    };
+  }
+}
+
 function pluginRecord(plugin: LoadedPlugin): PluginRecord {
   const manifest = plugin.manifest;
   return {
@@ -275,10 +488,51 @@ function renderGhqRepos(ghq: GhqState): string {
   return [fmt(header), fmt(widths.map((w) => "-".repeat(w))), ...rows.map(fmt)].join("\n");
 }
 
-function renderDiscoverTable(result: PeerSourceResult, plugins: PluginRegistryState, ghq: GhqState): string {
+function renderFleetConfig(fleet: FleetConfigState): string {
+  if (fleet.records.length === 0) return "no configured fleet workspaces";
+  const header = ["node", "name", "session", "endpoint", "repo"];
+  const rows = fleet.records.map((record) => [
+    record.node,
+    record.name,
+    record.session,
+    record.endpoint ?? "offline",
+    record.repo ?? "-",
+  ]);
+  const widths = header.map((h, i) => Math.max(h.length, ...rows.map((r) => r[i].length)));
+  const fmt = (cols: string[]) => cols.map((c, i) => c.padEnd(widths[i])).join("  ");
+  return [fmt(header), fmt(widths.map((w) => "-".repeat(w))), ...rows.map(fmt)].join("\n");
+}
+
+function renderRegisteredOracles(oracles: OracleRegistrationState): string {
+  if (oracles.records.length === 0) return "no registered oracles";
+  const header = ["name", "node", "awake", "sources", "repo", "ghq"];
+  const rows = oracles.records.map((oracle) => [
+    oracle.name,
+    oracle.node ?? "-",
+    oracle.awake ? "yes" : "no",
+    oracle.sources.join("+") || "-",
+    oracle.repo ?? "-",
+    oracle.ghqPath ?? "-",
+  ]);
+  const widths = header.map((h, i) => Math.max(h.length, ...rows.map((r) => r[i].length)));
+  const fmt = (cols: string[]) => cols.map((c, i) => c.padEnd(widths[i])).join("  ");
+  return [fmt(header), fmt(widths.map((w) => "-".repeat(w))), ...rows.map(fmt)].join("\n");
+}
+
+function renderDiscoverTable(
+  result: PeerSourceResult,
+  plugins: PluginRegistryState,
+  ghq: GhqState,
+  fleet: FleetConfigState,
+  oracles: OracleRegistrationState,
+): string {
   const chunks = [formatPeerSources(result)];
+  if (oracles.records.length > 0) chunks.push(`registered oracles\n${renderRegisteredOracles(oracles)}`);
+  if (fleet.records.length > 0) chunks.push(`fleet config\n${renderFleetConfig(fleet)}`);
   if (plugins.records.length > 0) chunks.push(`plugin registry\n${renderPluginRecords(plugins)}`);
   if (ghq.repos.length > 0) chunks.push(`ghq repos\n${renderGhqRepos(ghq)}`);
+  for (const warning of oracles.warnings) chunks.push(`warning: ${warning}`);
+  for (const warning of fleet.warnings) chunks.push(`warning: ${warning}`);
   for (const warning of plugins.warnings) chunks.push(`warning: ${warning}`);
   for (const warning of ghq.warnings) chunks.push(`warning: ${warning}`);
   return chunks.join("\n\n");
@@ -289,6 +543,8 @@ function renderDiscoverTree(
   live: TmuxLiveStateResult,
   plugins: PluginRegistryState,
   ghq: GhqState,
+  fleet: FleetConfigState,
+  oracles: OracleRegistrationState,
 ): string {
   const lines = ["discover"];
   lines.push(`  tmux (${live.live.length} live pane${live.live.length === 1 ? "" : "s"})`);
@@ -308,6 +564,19 @@ function renderDiscoverTree(
     const label = peer.name ?? peer.node ?? peer.oracle ?? "-";
     lines.push(`    ${peer.source} ${label} -> ${peer.url}`);
   }
+  lines.push(`  fleet config (${fleet.records.length} configured)`);
+  for (const record of fleet.records) {
+    const endpoint = record.endpoint ? ` endpoint=${record.endpoint}` : " offline";
+    const repo = record.repo ? ` repo=${record.repo}` : "";
+    lines.push(`    ${record.node}/${record.name} ${record.session}${endpoint}${repo}`);
+  }
+  lines.push(`  registered oracles (${oracles.records.length})`);
+  for (const oracle of oracles.records) {
+    const awake = oracle.awake ? " awake" : "";
+    const ghq = oracle.ghqPath ? ` ghq=${oracle.ghqPath}` : "";
+    const repo = oracle.repo ? ` repo=${oracle.repo}` : "";
+    lines.push(`    ${oracle.name}${awake} sources=${oracle.sources.join("+") || "-"}${repo}${ghq}`);
+  }
   lines.push(`  plugins (${plugins.records.length} registered)`);
   for (const plugin of plugins.records) {
     const command = plugin.command ? ` command=${plugin.command}` : "";
@@ -320,7 +589,7 @@ function renderDiscoverTree(
     const worktree = repo.worktree ? " worktree" : "";
     lines.push(`    ${repo.name}${oracle}${worktree} -> ${repo.path}`);
   }
-  for (const warning of [...result.warnings, ...live.warnings, ...plugins.warnings, ...ghq.warnings]) lines.push(`warning: ${warning}`);
+  for (const warning of [...result.warnings, ...live.warnings, ...fleet.warnings, ...oracles.warnings, ...plugins.warnings, ...ghq.warnings]) lines.push(`warning: ${warning}`);
   return lines.join("\n");
 }
 
@@ -354,7 +623,9 @@ export default async function handler(ctx: InvokeContext): Promise<InvokeResult>
     return { ok: true, output: logs.join("\n") || undefined };
   }
 
-  const result = await resolvePeerSources(loadConfig(), mode);
+  const config = loadConfig();
+  const result = await resolvePeerSources(config, mode);
+  const fleet = loadFleetConfigState(config, result.peers);
   const plugins = loadPluginRegistryState();
   const ghq = await loadGhqState();
   const includeLiveState = json || tree || awake;
@@ -367,42 +638,55 @@ export default async function handler(ctx: InvokeContext): Promise<InvokeResult>
   const visiblePeers = awake && !tree
     ? peersWithLive.filter((peer) => peer.awake)
     : peersWithLive;
+  const oracles = loadOracleRegistrationState(ghq, fleet, result.peers, includeLiveState ? liveState : undefined);
   const warnings = includeLiveState
-    ? [...result.warnings, ...liveState.warnings, ...plugins.warnings, ...ghq.warnings]
-    : [...result.warnings, ...plugins.warnings, ...ghq.warnings];
+    ? [...result.warnings, ...liveState.warnings, ...fleet.warnings, ...oracles.warnings, ...plugins.warnings, ...ghq.warnings]
+    : [...result.warnings, ...fleet.warnings, ...oracles.warnings, ...plugins.warnings, ...ghq.warnings];
 
   if (!json && !tree && !awake) {
-    emit(renderDiscoverTable(result, plugins, ghq));
+    emit(renderDiscoverTable(result, plugins, ghq, fleet, oracles));
     return { ok: true, output: logs.join("\n") || undefined };
   }
 
   if (json) {
     const live = liveJsonState(liveState);
+    const includeInventoryRecords = tree || !awake;
     emit(JSON.stringify({
       ok: true,
       mode: result.mode,
       total: tree
-        ? visiblePeers.length + liveState.live.length + plugins.records.length + ghq.repos.length
+        ? visiblePeers.length + liveState.live.length + fleet.records.length + oracles.records.length + plugins.records.length + ghq.repos.length
         : visiblePeers.length,
       awake,
-      peers: visiblePeers,
+      awakeOnly: awake,
+      peers: tree || !awake ? visiblePeers : visiblePeers,
+      fleet: {
+        source: fleet.source,
+        total: fleet.total,
+        records: includeInventoryRecords ? fleet.records : [],
+      },
+      oracles: {
+        source: oracles.source,
+        total: oracles.total,
+        records: includeInventoryRecords ? oracles.records : [],
+      },
       plugins: {
         source: plugins.source,
         total: plugins.total,
-        records: tree || !awake ? plugins.records : [],
+        records: includeInventoryRecords ? plugins.records : [],
       },
       ghq: {
         source: ghq.source,
         total: ghq.total,
-        repos: tree || !awake ? ghq.repos : [],
+        repos: includeInventoryRecords ? ghq.repos : [],
       },
       liveTotal: liveState.live.length,
       live,
-      ...(tree ? { tree: { live: live.sessions, peers: visiblePeers, plugins: plugins.records, ghq: ghq.repos } } : {}),
+      ...(tree ? { tree: { live: live.sessions, peers: visiblePeers, fleet: fleet.records, oracles: oracles.records, plugins: plugins.records, ghq: ghq.repos } } : {}),
       warnings,
     }, null, 2));
   } else {
-    emit(tree ? renderDiscoverTree(result, liveState, plugins, ghq) : formatTmuxLiveState(liveState));
+    emit(tree ? renderDiscoverTree(result, liveState, plugins, ghq, fleet, oracles) : formatTmuxLiveState(liveState));
   }
 
   return { ok: true, output: logs.join("\n") || undefined };
