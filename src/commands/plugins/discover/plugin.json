@@ -3,13 +3,14 @@
   "version": "1.0.0",
   "entry": "./index.ts",
   "sdk": "^1.0.0",
-  "description": "List configured and discovered federation peers.",
+  "description": "List configured/discovered federation peers and live tmux state.",
   "author": "Soul-Brews-Studio",
   "cli": {
     "command": "discover",
-    "help": "maw discover [--peers config|scout|both] [--json]",
+    "help": "maw discover [--peers config|scout|both] [--awake] [--json]",
     "flags": {
       "--peers": "string",
+      "--awake": "boolean",
       "--json": "boolean"
     }
   },

@@ -1,24 +1,24 @@
 # Coverage gap analysis
 
-Generated: 2026-05-20T09:52:07.059Z
+Generated: 2026-05-20T10:26:10.246Z
 
 Input: `coverage/lcov.info`
 
 Coverage scope: source-line-normalized Bun LCOV plus zero-coverage accounting for tracked `src/**/*.ts` files absent from LCOV.
 Excluded from Bun LCOV accounting: non-Bun-runtime AssemblyScript sources compiled to WebAssembly and covered by AssemblyScript harness tests instead of Bun line instrumentation.
 
-Overall line coverage: **100.0%** (31312/31313)
-Overall function coverage: **100.0%** (5273/5273)
+Overall line coverage: **100.0%** (31403/31404)
+Overall function coverage: **100.0%** (5306/5306)
 
 ## Module summary
 
 | Module | Files | Missing from LCOV | Lines | Functions | Branches |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| cli/dispatch | 94 | 0 | 100.0% (5785/5786) | 100.0% (907/907) | n/a (0/0) |
+| cli/dispatch | 95 | 0 | 100.0% (5857/5858) | 100.0% (938/938) | n/a (0/0) |
 | config/runtime | 19 | 0 | 100.0% (780/780) | 100.0% (135/135) | n/a (0/0) |
-| fleet | 19 | 0 | 100.0% (678/678) | 100.0% (108/108) | n/a (0/0) |
+| fleet | 19 | 0 | 100.0% (680/680) | 100.0% (108/108) | n/a (0/0) |
 | matcher | 3 | 0 | 100.0% (73/73) | 100.0% (18/18) | n/a (0/0) |
-| other | 175 | 5 | 100.0% (8691/8691) | 100.0% (1501/1501) | n/a (0/0) |
+| other | 175 | 5 | 100.0% (8708/8708) | 100.0% (1503/1503) | n/a (0/0) |
 | plugin dispatch | 15 | 1 | 100.0% (705/705) | 100.0% (91/91) | n/a (0/0) |
 | routing/aliases | 4 | 0 | 100.0% (431/431) | 100.0% (76/76) | n/a (0/0) |
 | transport | 28 | 0 | 100.0% (1698/1698) | 100.0% (454/454) | n/a (0/0) |
@@ -72,6 +72,7 @@ Overall function coverage: **100.0%** (5273/5273)
 | cli/dispatch | `src/commands/shared/comm-send.ts` | 100.0% | 100.0% |
 | cli/dispatch | `src/commands/shared/comm.ts` | 100.0% | 100.0% |
 | cli/dispatch | `src/commands/shared/context-limit.ts` | 100.0% | 100.0% |
+| cli/dispatch | `src/commands/shared/discover-live-state.ts` | 100.0% | 100.0% |
 | cli/dispatch | `src/commands/shared/done.ts` | 100.0% | 100.0% |
 | cli/dispatch | `src/commands/shared/federation-apply.ts` | 100.0% | 100.0% |
 | cli/dispatch | `src/commands/shared/federation-diff.ts` | 100.0% | 100.0% |

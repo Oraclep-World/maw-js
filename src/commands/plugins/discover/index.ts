@@ -1,14 +1,22 @@
 import type { InvokeContext, InvokeResult } from "../../../plugin/types";
 import { loadConfig } from "../../../config";
 import {
+  formatTmuxLiveState,
+  markPeerTargetsLive,
+  resolveTmuxLiveState,
+  type PeerTargetWithLive,
+  type TmuxLiveStateResult,
+} from "../../shared/discover-live-state";
+import {
   formatPeerSources,
   parsePeerSourceMode,
   resolvePeerSources,
+  type PeerSourceMode,
 } from "../../shared/peer-sources";
 
 export const command = {
   name: "discover",
-  description: "List configured and discovered federation peers.",
+  description: "List configured/discovered federation peers and live tmux state.",
 };
 
 function cliArgs(ctx: InvokeContext): string[] {
@@ -56,18 +64,50 @@ export default async function handler(ctx: InvokeContext): Promise<InvokeResult>
     return {
       ok: false,
       error: "invalid_peer_source",
-      output: "usage: maw discover [--peers config|scout|both] [--json]",
+      output: "usage: maw discover [--peers config|scout|both] [--awake] [--json]",
     };
   }
 
   const json = args.includes("--json") || boolish(query.json) === true;
+  const awake = args.includes("--awake") || boolish(query.awake) === true;
   const result = await resolvePeerSources(loadConfig(), mode);
+  const includeLiveState = json || awake;
+  const liveState = includeLiveState
+    ? await resolveTmuxLiveState(result.peers)
+    : { source: "tmux" as const, live: [], warnings: [] };
+  const peersWithLive = markPeerTargetsLive(result.peers, liveState.live);
+  const visiblePeers = awake ? peersWithLive.filter((peer) => peer.awake) : peersWithLive;
+  const warnings = includeLiveState ? [...result.warnings, ...liveState.warnings] : result.warnings;
   emit(json ? JSON.stringify({
     ok: true,
     mode: result.mode,
-    total: result.peers.length,
-    peers: result.peers,
-    warnings: result.warnings,
-  }, null, 2) : formatPeerSources(result));
+    awake,
+    total: visiblePeers.length,
+    peers: visiblePeers,
+    liveTotal: liveState.live.length,
+    live: liveState.live,
+    warnings,
+  }, null, 2) : formatDiscoverText({
+    mode: result.mode,
+    peers: visiblePeers,
+    warnings,
+    liveState,
+    awake,
+  }));
   return { ok: true, output: logs.join("\n") || undefined };
+}
+
+function formatDiscoverText(input: {
+  mode: PeerSourceMode;
+  peers: PeerTargetWithLive[];
+  warnings: string[];
+  liveState: TmuxLiveStateResult;
+  awake: boolean;
+}): string {
+  if (input.awake) return formatTmuxLiveState(input.liveState);
+  return formatPeerSources({
+    mode: input.mode,
+    peers: input.peers,
+    warnings: input.warnings,
+  });
 }
