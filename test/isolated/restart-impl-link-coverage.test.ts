@@ -1,6 +1,6 @@
 /** Isolated SDK-link branch coverage for src/vendor/mpr-plugins/restart/impl.ts. */
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { mkdtempSync, rmSync } from "fs";
+import { existsSync, mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
@@ -10,7 +10,12 @@ let wakeCalls = 0;
 let logs: string[] = [];
 let homeDir = "";
 let failCheckoutLink = false;
-const originalHome = process.env.HOME;
+const originalEnv = {
+  home: process.env.HOME,
+  mawHome: process.env.MAW_HOME,
+  mawDataDir: process.env.MAW_DATA_DIR,
+  mawXdg: process.env.MAW_XDG,
+};
 
 class MockTmux {
   async killSession(_name: string) {}
@@ -48,13 +53,22 @@ beforeEach(() => {
   logs = [];
   homeDir = mkdtempSync(join(tmpdir(), "restart-link-home-"));
   process.env.HOME = homeDir;
+  delete process.env.MAW_HOME;
+  process.env.MAW_DATA_DIR = join(homeDir, ".maw");
+  delete process.env.MAW_XDG;
   failCheckoutLink = false;
   console.log = (...args: unknown[]) => { logs.push(args.map(String).join(" ")); };
 });
 
 afterEach(() => {
-  if (originalHome === undefined) delete process.env.HOME;
-  else process.env.HOME = originalHome;
+  if (originalEnv.home === undefined) delete process.env.HOME;
+  else process.env.HOME = originalEnv.home;
+  if (originalEnv.mawHome === undefined) delete process.env.MAW_HOME;
+  else process.env.MAW_HOME = originalEnv.mawHome;
+  if (originalEnv.mawDataDir === undefined) delete process.env.MAW_DATA_DIR;
+  else process.env.MAW_DATA_DIR = originalEnv.mawDataDir;
+  if (originalEnv.mawXdg === undefined) delete process.env.MAW_XDG;
+  else process.env.MAW_XDG = originalEnv.mawXdg;
   if (homeDir) rmSync(homeDir, { recursive: true, force: true });
 });
 
@@ -67,7 +81,8 @@ describe("restart impl SDK link branch", () => {
       "maw --version",
       "cd /tmp/maw-js-checkout && bun link",
     ]);
-    expect(execCalls[3]).toMatch(/^cd .*\/.oracle && bun link maw$/);
+    expect(execCalls[3]).toBe(`cd ${join(homeDir, ".maw", "oracle-plugins")} && bun link maw`);
+    expect(existsSync(join(homeDir, ".maw", "oracle-plugins", "package.json"))).toBe(true);
     expect(logs.join("\n")).toContain("SDK linked");
     expect(sleepCalls).toBe(1);
     expect(wakeCalls).toBe(1);

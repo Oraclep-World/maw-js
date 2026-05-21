@@ -155,9 +155,9 @@ describe("talk-to impl isolated coverage", () => {
       expect(runHookCalls).toEqual([
         { name: "after_send", payload: { to: "alpha", message: sendKeysCalls[0]?.message } },
       ]);
-      expect(mkdirCalls).toEqual([{ path: "/home/tester/.oracle", opts: { recursive: true } }]);
+      expect(mkdirCalls).toEqual([{ path: "/home/tester/.maw", opts: { recursive: true } }]);
       expect(appendFileCalls).toHaveLength(1);
-      expect(appendFileCalls[0]?.path).toBe("/home/tester/.oracle/maw-log.jsonl");
+      expect(appendFileCalls[0]?.path).toBe("/home/tester/.maw/maw-log.jsonl");
       expect(appendFileCalls[0]?.data).toContain('"to":"alpha"');
       expect(appendFileCalls[0]?.data).toContain('"target":"alpha:oracle.0"');
       expect(appendFileCalls[0]?.data).toContain('"host":"oracle-host"');

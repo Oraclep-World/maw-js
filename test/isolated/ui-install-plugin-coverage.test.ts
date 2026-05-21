@@ -19,6 +19,7 @@ const original = {
   write: process.stdout.write,
   log: console.log,
   error: console.error,
+  dataDir: process.env.MAW_DATA_DIR,
 };
 
 mock.module("os", () => ({
@@ -43,7 +44,7 @@ mock.module("child_process", () => ({
 }));
 
 const ui = await import("../../src/vendor/mpr-plugins/ui/ui-install.ts?ui-install-plugin-coverage");
-const { buildGhReleaseArgs, cmdUiInstall, cmdUiStatus, resolveInstalledVersion } = ui;
+const { buildGhReleaseArgs, cmdUiInstall, cmdUiStatus, resolveInstalledVersion, uiDistDir } = ui;
 
 beforeEach(() => {
   rmSync(distDir, { recursive: true, force: true });
@@ -53,6 +54,7 @@ beforeEach(() => {
   logs = [];
   errors = [];
   tarWritesFile = true;
+  delete process.env.MAW_DATA_DIR;
   process.stdout.write = ((chunk: string | Uint8Array) => {
     stdoutWrites.push(String(chunk));
     return true;
@@ -65,6 +67,8 @@ afterEach(() => {
   process.stdout.write = original.write;
   console.log = original.log;
   console.error = original.error;
+  if (original.dataDir === undefined) delete process.env.MAW_DATA_DIR;
+  else process.env.MAW_DATA_DIR = original.dataDir;
 });
 
 describe("ui install plugin coverage", () => {
@@ -100,6 +104,29 @@ describe("ui install plugin coverage", () => {
     const out = logs.join("\n");
     expect(out).toContain("maw-ui v4.5.6");
     expect(out).toContain("2 top-level entries");
+  });
+
+  test("dist directory follows MAW_DATA_DIR for install/status paths", async () => {
+    const dataDir = mkdtempSync(join(tempRoot, "maw-data-"));
+    process.env.MAW_DATA_DIR = dataDir;
+    const xdgDistDir = join(dataDir, "ui", "dist");
+
+    expect(uiDistDir()).toBe(xdgDistDir);
+
+    await cmdUiStatus();
+    expect(logs.join("\n")).toContain("maw-ui not installed");
+
+    logs = [];
+    spawnStatuses = [
+      { status: 0, stdout: "", stderr: "" },
+      { status: 0, stdout: "", stderr: "" },
+    ];
+
+    await cmdUiInstall("v7.0.0");
+
+    expect(spawnCalls.find((call) => call.cmd === "tar")?.args).toContain(xdgDistDir);
+    expect(readFileSync(join(xdgDistDir, ".maw-ui-version"), "utf-8")).toBe("v7.0.0\n");
+    expect(logs.join("\n")).toContain(xdgDistDir);
   });
 
   test("install downloads latest, extracts, writes resolved marker, and cleans temp dir", async () => {

@@ -115,6 +115,7 @@ mock.module(join(root, "src/config/ghq-root"), () => ({
 
 mock.module(join(root, "src/commands/shared/fleet-load"), () => ({
   loadFleet: () => state.fleet,
+  countDisabledFleetFiles: () => 0,
   loadFleetEntries: () => [],
   getSessionNames: async () => state.fleet.map(s => s.name),
 }));

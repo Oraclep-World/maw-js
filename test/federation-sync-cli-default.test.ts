@@ -211,6 +211,25 @@ describe("cmdFederationSync default coverage", () => {
     expect(h.saves).toEqual([]);
   });
 
+  test("prints peer-source warnings before the normal text sync header", async () => {
+    const h = makeHarness({
+      config: { node: "m5", agents: {} },
+      identities: [peer("white", "white", [])],
+      deps: {
+        resolvePeerSources: async () => ({
+          peers: [{ name: "white", url: "https://white.example" }],
+          warnings: ["discovery source was unavailable"],
+        }),
+      },
+    });
+
+    await h.run();
+
+    const out = joined(h.logs);
+    expect(out).toContain("discovery source was unavailable");
+    expect(out.indexOf("discovery source was unavailable")).toBeLessThan(out.indexOf("Federation Sync"));
+  });
+
   test("prints in-sync summary when no diff is dirty", async () => {
     const h = makeHarness({
       config: {

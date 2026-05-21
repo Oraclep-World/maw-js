@@ -35,6 +35,10 @@ mock.module(import.meta.resolve("../../src/core/paths"), () => ({
   FLEET_DIR: fleetRoot,
 }));
 
+mock.module(import.meta.resolve("../../src/core/xdg"), () => ({
+  mawStatePath: () => fleetRoot,
+}));
+
 mock.module(import.meta.resolve("../../src/core/fleet/worktree-window-match"), () => ({
   resolveWorktreeWindow: (mainRepoName: string, wtName: string, sessions: unknown[]) => {
     matchCalls.push([mainRepoName, wtName, sessions]);
@@ -190,4 +194,3 @@ describe("scanWorktrees runtime classification", () => {
     }]);
   });
 });
-

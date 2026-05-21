@@ -10,9 +10,9 @@
  * mock.module is process-global → capture REAL fn refs BEFORE install so the
  * passthrough branch doesn't point at our wrapper (see #375 pollution catalog).
  * Every passthrough wrapper forwards via (...args).
- * os.homedir() caching is avoided by setting process.env.MAW_CONFIG_DIR to a
- * mkdtempSync path BEFORE any workspace-* module is imported — workspace-store
- * reads that env var at module load (src/commands/shared/workspace-store.ts:7).
+ * os.homedir() caching is avoided by setting process.env.MAW_DATA_DIR to a
+ * mkdtempSync path before each workspace-store operation; workspace-store
+ * resolves paths through the shared XDG helper at call time.
  *
  * process.exit is stubbed into a throw so we can observe exit branches without
  * tearing the runner down.
@@ -32,6 +32,7 @@ let mockActive = false;
 
 const tmpConfigDir = mkdtempSync(join(tmpdir(), "maw-workspace-test-"));
 process.env.MAW_CONFIG_DIR = tmpConfigDir;
+process.env.MAW_DATA_DIR = tmpConfigDir;
 const WS_DIR = join(tmpConfigDir, "workspaces");
 
 function clearWorkspacesDir(): void {

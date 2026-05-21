@@ -15,6 +15,15 @@ import { mockSshModule } from "../helpers/mock-ssh";
 type Session = { name: string; windows: Array<{ name: string; index?: number; active?: boolean }> };
 
 const fleetRoot = mkdtempSync(join(tmpdir(), "maw-worktrees-cleanup-fleet-"));
+const stateFleetRoot = mkdtempSync(join(tmpdir(), "maw-worktrees-cleanup-state-fleet-"));
+
+type FleetEntry = {
+  file: string;
+  path?: string;
+  num: number;
+  groupName: string;
+  session: { name?: string; windows?: Array<{ name: string; repo: string }> };
+};
 
 let ghqRoot = "/ghq";
 let commands: string[] = [];
@@ -22,6 +31,8 @@ let sessions: Session[] = [];
 let killedTargets: string[] = [];
 let hostExecImpl: (cmd: string) => Promise<string> | string = () => "";
 let killWindowImpl: (target: string) => Promise<void> | void = () => {};
+let fleetEntries: FleetEntry[] = [];
+let loadFleetEntriesImpl: () => FleetEntry[] = () => fleetEntries;
 
 mock.module(import.meta.resolve("../../src/core/transport/ssh"), () =>
   mockSshModule({
@@ -46,14 +57,27 @@ mock.module(import.meta.resolve("../../src/config/ghq-root"), () => ({
   getGhqRoot: () => ghqRoot,
 }));
 
-mock.module(import.meta.resolve("../../src/core/paths"), () => ({
-  FLEET_DIR: fleetRoot,
+mock.module(import.meta.resolve("../../src/commands/shared/fleet-load"), () => ({
+  loadFleetEntries: () => loadFleetEntriesImpl(),
 }));
 
 const { cleanupWorktree } = await import("../../src/core/fleet/worktrees-cleanup.ts?worktrees-cleanup-coverage");
 
 const worktreePath = (repo = "maw-js", wt = "1-tile-1", org = "Soul-Brews-Studio") =>
   `/ghq/github.com/${org}/${repo}.wt-${wt}`;
+
+function addFleetEntry(file: string, session: FleetEntry["session"], dir = fleetRoot) {
+  const path = join(dir, file);
+  writeFileSync(path, JSON.stringify(session, null, 2));
+  fleetEntries.push({
+    file,
+    path,
+    num: Number(file.match(/^(\d+)-/)?.[1] ?? 0),
+    groupName: file.replace(/^\d+-/, "").replace(/\.json$/, ""),
+    session,
+  });
+  return path;
+}
 
 beforeEach(() => {
   ghqRoot = "/ghq";
@@ -62,12 +86,17 @@ beforeEach(() => {
   killedTargets = [];
   hostExecImpl = () => "";
   killWindowImpl = () => {};
+  fleetEntries = [];
+  loadFleetEntriesImpl = () => fleetEntries;
   rmSync(fleetRoot, { recursive: true, force: true });
+  rmSync(stateFleetRoot, { recursive: true, force: true });
   mkdirSync(fleetRoot, { recursive: true });
+  mkdirSync(stateFleetRoot, { recursive: true });
 });
 
 afterAll(() => {
   rmSync(fleetRoot, { recursive: true, force: true });
+  rmSync(stateFleetRoot, { recursive: true, force: true });
 });
 
 describe("cleanupWorktree coverage", () => {
@@ -80,12 +109,12 @@ describe("cleanupWorktree coverage", () => {
   });
 
   test("exact window match kills tmux, removes/prunes worktree, deletes branch, and rewrites fleet config", async () => {
-    writeFileSync(join(fleetRoot, "team.json"), JSON.stringify({
+    addFleetEntry("team.json", {
       windows: [
         { name: "tile-1", repo: "Soul-Brews-Studio/maw-js.wt-1-tile-1" },
         { name: "lead", repo: "Soul-Brews-Studio/maw-js" },
       ],
-    }, null, 2));
+    });
     writeFileSync(join(fleetRoot, "notes.txt"), "ignored");
 
     sessions = [{ name: "work", windows: [{ name: "tile-1" }, { name: "lead" }] }];
@@ -115,8 +144,33 @@ describe("cleanupWorktree coverage", () => {
     });
   });
 
+  test("writes fleet cleanup back to the source XDG state path", async () => {
+    const statePath = addFleetEntry("01-maw.json", {
+      name: "01-maw",
+      windows: [
+        { name: "tile-1", repo: "Soul-Brews-Studio/maw-js.wt-1-tile-1" },
+        { name: "lead", repo: "Soul-Brews-Studio/maw-js" },
+      ],
+    }, stateFleetRoot);
+
+    sessions = [];
+    hostExecImpl = (cmd) => {
+      if (cmd.includes("rev-parse --abbrev-ref HEAD")) return "feature/cleanup\n";
+      if (cmd.includes("worktree remove") || cmd.includes("worktree prune") || cmd.includes("branch -d")) return "";
+      throw new Error(`unexpected command: ${cmd}`);
+    };
+
+    const log = await cleanupWorktree(worktreePath());
+
+    expect(log).toContain("removed from 01-maw.json");
+    expect(JSON.parse(readFileSync(statePath, "utf-8"))).toEqual({
+      name: "01-maw",
+      windows: [{ name: "lead", repo: "Soul-Brews-Studio/maw-js" }],
+    });
+  });
+
   test("ambiguous window matches are not killed; protected branches and remove failures are reported safely", async () => {
-    writeFileSync(join(fleetRoot, "bad.json"), "{ not json");
+    loadFleetEntriesImpl = () => { throw new Error("bad json"); };
     sessions = [
       { name: "neo", windows: [{ name: "neo-tile-1" }] },
       { name: "pulse", windows: [{ name: "pulse-tile-1" }] },
@@ -144,7 +198,7 @@ describe("cleanupWorktree coverage", () => {
   });
 
   test("fuzzy window match reports already-closed windows and continues when branch lookup and fleet IO fail", async () => {
-    rmSync(fleetRoot, { recursive: true, force: true });
+    loadFleetEntriesImpl = () => { throw new Error("missing fleet"); };
     sessions = [{ name: "work", windows: [{ name: "oracle-tile-1" }] }];
     killWindowImpl = () => {
       throw new Error("window missing");
@@ -170,7 +224,7 @@ describe("cleanupWorktree coverage", () => {
   });
 
   test("no window match still removes the worktree and reports branch deletion failures", async () => {
-    writeFileSync(join(fleetRoot, "team.json"), JSON.stringify({ windows: [] }));
+    addFleetEntry("team.json", { windows: [] });
     sessions = [{ name: "work", windows: [{ name: "lead" }] }];
     hostExecImpl = (cmd) => {
       if (cmd.includes("rev-parse --abbrev-ref HEAD")) return "feature/unmerged\n";

@@ -17,6 +17,10 @@ let spawnImpl: (command: string, args: string[], options: any) => { unref: () =>
 let spawnCalls: Array<{ command: string; args: string[]; options: any }> = [];
 let unrefCalls = 0;
 const originalAgentName = process.env.CLAUDE_AGENT_NAME;
+const originalMawHome = process.env.MAW_HOME;
+const originalMawConfigDir = process.env.MAW_CONFIG_DIR;
+const originalMawDataDir = process.env.MAW_DATA_DIR;
+const originalXdgConfigHome = process.env.XDG_CONFIG_HOME;
 const originalWarn = console.warn;
 const originalError = console.error;
 const globalConfigSandbox = mkdtempSync(join(tmpdir(), "maw-coverage-100b-config-"));
@@ -75,6 +79,10 @@ function resetHookState() {
     return { unref: () => { unrefCalls += 1; } };
   };
   restoreEnv("CLAUDE_AGENT_NAME", originalAgentName);
+  delete process.env.MAW_HOME;
+  delete process.env.MAW_CONFIG_DIR;
+  process.env.MAW_DATA_DIR = join(mockConfigDir, "data");
+  process.env.XDG_CONFIG_HOME = join(mockHome, ".config");
 }
 
 async function importHooks(label: string) {
@@ -102,6 +110,10 @@ beforeEach(() => {
 
 afterAll(() => {
   rmSync(globalConfigSandbox, { recursive: true, force: true });
+  restoreEnv("MAW_HOME", originalMawHome);
+  restoreEnv("MAW_CONFIG_DIR", originalMawConfigDir);
+  restoreEnv("MAW_DATA_DIR", originalMawDataDir);
+  restoreEnv("XDG_CONFIG_HOME", originalXdgConfigHome);
 });
 
 afterEach(() => {
@@ -118,10 +130,18 @@ describe("coverage 100b runtime hooks", () => {
     await first.runHook("after_send", { to: "pulse", message: "ignored" });
     await first.runHook("after_send", { to: "pulse", message: "ignored again" });
 
-    expect(readFileCalls).toEqual([{ path: join(mockHome, ".oracle", "maw.hooks.json"), encoding: "utf-8" }]);
+    expect(readFileCalls).toEqual([
+      { path: join(mockHome, ".config", "maw", "maw.hooks.json"), encoding: "utf-8" },
+      { path: join(mockHome, ".oracle", "maw.hooks.json"), encoding: "utf-8" },
+    ]);
     expect(spawnCalls).toEqual([]);
 
-    readFileImpl = async () => JSON.stringify({ hooks: { after_send: "/usr/local/bin/plain-hook" } });
+    readFileImpl = async (path) => {
+      if (path === join(mockHome, ".config", "maw", "maw.hooks.json")) {
+        return JSON.stringify({ hooks: { after_send: "/usr/local/bin/plain-hook" } });
+      }
+      throw new Error("unexpected legacy hook read");
+    };
     delete process.env.CLAUDE_AGENT_NAME;
     const second = await importHooks("plain-path");
     await second.runHook("after_send", { to: "receiver", message: "hello" });
@@ -129,6 +149,25 @@ describe("coverage 100b runtime hooks", () => {
     expect(spawnCalls).toHaveLength(1);
     expect(spawnCalls[0].args).toEqual(["-c", "/usr/local/bin/plain-hook"]);
     expect(spawnCalls[0].options.env.MAW_FROM).toBe("unknown");
+    expect(unrefCalls).toBe(1);
+  });
+
+  test("hook config falls back to the legacy oracle path when XDG config is missing", async () => {
+    readFileImpl = async (path) => {
+      if (path === join(mockHome, ".oracle", "maw.hooks.json")) {
+        return JSON.stringify({ hooks: { after_send: "/usr/local/bin/legacy-hook" } });
+      }
+      throw new Error("missing XDG hook config");
+    };
+
+    const hooks = await importHooks("legacy-fallback");
+    await hooks.runHook("after_send", { to: "receiver", message: "hello" });
+
+    expect(readFileCalls).toEqual([
+      { path: join(mockHome, ".config", "maw", "maw.hooks.json"), encoding: "utf-8" },
+      { path: join(mockHome, ".oracle", "maw.hooks.json"), encoding: "utf-8" },
+    ]);
+    expect(spawnCalls.at(-1)?.args).toEqual(["-c", "/usr/local/bin/legacy-hook"]);
     expect(unrefCalls).toBe(1);
   });
 });

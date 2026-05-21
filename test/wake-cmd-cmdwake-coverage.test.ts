@@ -851,6 +851,44 @@ describe("cmdWake main-suite coverage", () => {
     )).rejects.toThrow("54-mawjs:mawjs-oracle");
   });
 
+  test("#1824 bring --to window-name can pick among ambiguous destination windows", async () => {
+    sessions.push({ name: "55-mawjs" });
+    hasSessions.add("55-mawjs");
+    addWindow("54-mawjs", "mawjs-oracle");
+    addWindow("54-mawjs", "mawjs-features");
+    addWindow("55-mawjs", "mawjs-oracle");
+    addWindow("55-mawjs", "mawjs-features");
+    _wtPicker.isStdoutTTY = () => true;
+    _wtPicker.readChoice = () => "2";
+
+    const { result, logs } = await captureLogs(() =>
+      cmdWake("mawjs-features", {
+        bringAlias: true,
+        split: true,
+        pick: true,
+        session: "mawjs-oracle",
+      }),
+    );
+
+    expect(result).toBe("55-mawjs:mawjs-features");
+    expect(logs.join("\n")).toContain("'mawjs-oracle' is ambiguous — bring which?");
+    expect(maybeSplitCalls).toEqual([
+      {
+        target: "55-mawjs:mawjs-features",
+        opts: expect.objectContaining({
+          session: "55-mawjs",
+          splitTarget: "55-mawjs:mawjs-oracle",
+          resolvedBringDestinationWindow: expect.objectContaining({
+            session: "55-mawjs",
+            window: "mawjs-oracle",
+            target: "55-mawjs:mawjs-oracle",
+          }),
+        }),
+      },
+    ]);
+    expect(takeSnapshotCalls).toEqual(["wake"]);
+  });
+
   test("#1816 bring can resolve exact windows from the caller tmux session", async () => {
     const originalPane = process.env.TMUX_PANE;
     process.env.TMUX_PANE = "%42";

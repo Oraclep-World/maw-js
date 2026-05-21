@@ -6,6 +6,10 @@ import { tmpdir } from "node:os";
 
 const homeDir = mkdtempSync(join(tmpdir(), "maw-resume-home-"));
 const parkedDir = join(homeDir, ".config/maw/parked");
+const stateRoot = join(homeDir, ".maw-state");
+const stateParkedDir = join(stateRoot, "parked");
+process.env.MAW_STATE_DIR = stateRoot;
+process.env.MAW_CONFIG_DIR = join(homeDir, ".config/maw");
 
 let currentSession = "oracle";
 let windows: Array<{ index: number; name: string }> = [];
@@ -58,6 +62,7 @@ const { cmdResume } = await import("../../src/vendor/mpr-plugins/resume/impl.ts?
 
 beforeEach(() => {
   rmSync(parkedDir, { recursive: true, force: true });
+  rmSync(stateParkedDir, { recursive: true, force: true });
   logs = [];
   errors = [];
   sendTextCalls = [];
@@ -94,6 +99,32 @@ describe("resume plugin coverage", () => {
     expect(out).toContain("(no note)");
     expect(out).toContain("no branch");
     expect(out).toContain("clean");
+  });
+
+  test("prefers state parked snapshots while still listing legacy config snapshots", async () => {
+    mkdirSync(stateParkedDir, { recursive: true });
+    writeFileSync(
+      join(stateParkedDir, "stateful.json"),
+      JSON.stringify({
+        window: "stateful",
+        session: "oracle",
+        branch: "alpha",
+        cwd: "/tmp/stateful",
+        lastCommit: "",
+        dirtyFiles: [],
+        note: "state parked tab",
+        parkedAt: "2026-05-18T00:00:00.000Z",
+      }),
+    );
+    writeSnapshot("legacy");
+
+    await cmdResume();
+
+    const out = logs.join("\n");
+    expect(out).toContain("stateful");
+    expect(out).toContain("state parked tab");
+    expect(out).toContain("legacy");
+    expect(out).toContain("resume the thing");
   });
 
   test("resumes by current tmux window number and deletes the snapshot", async () => {

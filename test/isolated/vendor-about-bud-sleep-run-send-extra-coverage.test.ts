@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, readFileSync, readdirSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
@@ -40,6 +40,26 @@ const originalConsole = {
   error: console.error,
 };
 const originalDateNow = Date.now;
+
+function loadTestFleetEntries() {
+  return readdirSync(fleetDir)
+    .filter(file => file.endsWith(".json") && !file.endsWith(".disabled"))
+    .sort()
+    .map(file => {
+      const match = file.match(/^(\d+)-(.+)\.json$/);
+      return {
+        file,
+        path: join(fleetDir, file),
+        num: match ? Number.parseInt(match[1], 10) : 0,
+        groupName: match ? match[2] : file.replace(/\.json$/, ""),
+        session: JSON.parse(readFileSync(join(fleetDir, file), "utf-8") || "{}"),
+      };
+    });
+}
+
+mock.module("maw-js/commands/shared/fleet-load", () => ({
+  loadFleetEntries: loadTestFleetEntries,
+}));
 
 mock.module("maw-js/sdk", () => ({
   FLEET_DIR: fleetDir,

@@ -77,6 +77,7 @@ mock.module(import.meta.resolve("../../src/config/ghq-root"), () => ({
 
 mock.module(import.meta.resolve("../../src/commands/shared/fleet-load"), () => ({
   loadFleet: () => sessions,
+  countDisabledFleetFiles: () => 0,
 }));
 
 mock.module(import.meta.resolve("../../src/commands/shared/wake"), () => ({

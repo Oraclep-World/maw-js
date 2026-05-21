@@ -65,21 +65,65 @@ export async function isPaneIdle(paneTarget: string, deps: Partial<WakeSessionDe
   }
 }
 
-async function shareParentClaudeDir(repoPath: string, wtPath: string, log: WakeSessionDeps["log"]): Promise<void> {
-  const { existsSync } = await import("fs");
+export async function reconcileParentClaudeDir(repoPath: string, wtPath: string, log: WakeSessionDeps["log"]): Promise<void> {
+  const { existsSync, lstatSync, mkdirSync, readdirSync, rmSync } = await import("fs");
   const { symlink } = await import("fs/promises");
   const { join, relative } = await import("path");
   const parentClaudeDir = join(repoPath, ".claude");
+  const parentSkillsDir = join(parentClaudeDir, "skills");
   const wtClaudeLink = join(wtPath, ".claude");
-  if (!existsSync(parentClaudeDir) || existsSync(wtClaudeLink)) return;
+  if (!existsSync(parentClaudeDir)) return;
 
-  const target = relative(wtPath, parentClaudeDir) || parentClaudeDir;
+  if (!existsSync(wtClaudeLink)) {
+    const target = relative(wtPath, parentClaudeDir) || parentClaudeDir;
+    try {
+      await symlink(target, wtClaudeLink, "dir");
+      log(`\x1b[32m+\x1b[0m .claude: ${wtClaudeLink} → ${target}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      log(`\x1b[33m⚠\x1b[0m .claude share skipped: ${message}`);
+    }
+    return;
+  }
+
+  if (!existsSync(parentSkillsDir)) return;
   try {
-    await symlink(target, wtClaudeLink, "dir");
-    log(`\x1b[32m+\x1b[0m .claude: ${wtClaudeLink} → ${target}`);
+    if (lstatSync(wtClaudeLink).isSymbolicLink()) return;
+  } catch { return; }
+
+  const wtSkillsLink = join(wtClaudeLink, "skills");
+  if (existsSync(wtSkillsLink)) {
+    let replace = false;
+    try {
+      const stat = lstatSync(wtSkillsLink);
+      if (stat.isSymbolicLink()) return;
+      if (!stat.isDirectory()) {
+        log(`\x1b[33m⚠\x1b[0m .claude/skills share skipped: existing non-directory`);
+        return;
+      }
+      const entries = readdirSync(wtSkillsLink);
+      replace = entries.length === 0 || entries.every(name => existsSync(join(parentSkillsDir, name)));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      log(`\x1b[33m⚠\x1b[0m .claude/skills share skipped: ${message}`);
+      return;
+    }
+    if (!replace) {
+      log(`\x1b[33m⚠\x1b[0m .claude/skills share skipped: local-only skills present`);
+      return;
+    }
+    rmSync(wtSkillsLink, { recursive: true, force: true });
+  } else {
+    mkdirSync(wtClaudeLink, { recursive: true });
+  }
+
+  const target = relative(wtClaudeLink, parentSkillsDir) || parentSkillsDir;
+  try {
+    await symlink(target, wtSkillsLink, "dir");
+    log(`\x1b[32m+\x1b[0m .claude/skills: ${wtSkillsLink} → ${target}`);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    log(`\x1b[33m⚠\x1b[0m .claude share skipped: ${message}`);
+    log(`\x1b[33m⚠\x1b[0m .claude/skills share skipped: ${message}`);
   }
 }
 
@@ -189,7 +233,7 @@ export async function createWorktree(
     ? `'${safe(wtPath)}' '${safe(branch)}'`
     : `'${safe(wtPath)}' -b '${safe(branch)}'`;
   await d.hostExec(`git -C '${safe(repoPath)}' worktree add ${addArgs}`);
-  await shareParentClaudeDir(repoPath, wtPath, d.log);
+  await reconcileParentClaudeDir(repoPath, wtPath, d.log);
   d.log(`\x1b[32m+\x1b[0m worktree: ${wtPath} (${branch}${branchExists ? ", reused branch" : ""})`);
   return { wtPath, windowName: `${oracle}-${name}` };
 }

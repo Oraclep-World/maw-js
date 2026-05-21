@@ -104,6 +104,10 @@ describe("shared scaffold and CLI helper low-hanging branches", () => {
     process.chdir(cwd);
     const home = tmp("maw-plugin-create-home-");
     process.env.HOME = home;
+    delete process.env.MAW_HOME;
+    delete process.env.MAW_DATA_DIR;
+    delete process.env.MAW_PLUGIN_HOME;
+    delete process.env.MAW_XDG;
     const { cmdPluginCreate } = await import("../../src/commands/shared/plugin-create-cmd.ts?coverage-100b-create-dest");
 
     let got = await capture(() => cmdPluginCreate("demo-here", { "--rust": true, "--here": true }));
@@ -114,9 +118,15 @@ describe("shared scaffold and CLI helper low-hanging branches", () => {
 
     got = await capture(() => cmdPluginCreate("demo-home", { "--as": true }));
     expect(got.exitCode).toBeUndefined();
-    const defaultDest = join(homedir(), ".oracle", "plugins", "demo-home");
+    const defaultDest = join(homedir(), ".maw", "plugins", "demo-home");
     expect(asCalls).toEqual([{ name: "demo-home", dest: defaultDest }]);
     expect(got.stdout).toContain(defaultDest);
+
+    const pluginHome = tmp("maw-plugin-create-plugin-home-");
+    process.env.MAW_PLUGIN_HOME = pluginHome;
+    got = await capture(() => cmdPluginCreate("demo-plugin-home", { "--as": true }));
+    expect(got.exitCode).toBeUndefined();
+    expect(asCalls.at(-1)).toEqual({ name: "demo-plugin-home", dest: join(pluginHome, "demo-plugin-home") });
   });
 
   test("checkCapacity includes the action hint in the thrown cap error", async () => {

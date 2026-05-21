@@ -19,7 +19,11 @@ import { join } from "path";
 import type { WorktreeInfo } from "../src/core/fleet/worktrees-scan";
 
 const fleetRoot = mkdtempSync(join(tmpdir(), "maw-wake-resolve-fleet-"));
+const stateRoot = mkdtempSync(join(tmpdir(), "maw-wake-resolve-state-"));
+const stateFleetRoot = join(stateRoot, "fleet");
 const tempRoot = mkdtempSync(join(tmpdir(), "maw-wake-resolve-runtime-"));
+const originalMawStateDir = process.env.MAW_STATE_DIR;
+process.env.MAW_STATE_DIR = stateRoot;
 
 const _rSdk = await import("../src/sdk");
 const _rConfig = await import("../src/config");
@@ -155,10 +159,16 @@ const {
 function resetFleetDir(): void {
   rmSync(fleetRoot, { recursive: true, force: true });
   mkdirSync(fleetRoot, { recursive: true });
+  rmSync(stateFleetRoot, { recursive: true, force: true });
+  mkdirSync(stateFleetRoot, { recursive: true });
 }
 
 function writeFleet(name: string, windows: any[]): void {
   writeFileSync(join(fleetRoot, `${name}.json`), JSON.stringify({ name, windows }, null, 2));
+}
+
+function writeStateFleet(name: string, windows: any[]): void {
+  writeFileSync(join(stateFleetRoot, `${name}.json`), JSON.stringify({ name, windows }, null, 2));
 }
 
 function worktree(path: string, mainRepo: string): WorktreeInfo {
@@ -207,7 +217,10 @@ afterEach(() => {
 });
 
 afterAll(() => {
+  if (originalMawStateDir === undefined) delete process.env.MAW_STATE_DIR;
+  else process.env.MAW_STATE_DIR = originalMawStateDir;
   rmSync(fleetRoot, { recursive: true, force: true });
+  rmSync(stateRoot, { recursive: true, force: true });
   rmSync(tempRoot, { recursive: true, force: true });
 });
 
@@ -243,6 +256,19 @@ describe("resolveOracle runtime paths", () => {
       parentDir: "/repos/Soul-Brews-Studio",
     });
     expect(ghqFindCalls).toContain("/mawjs-oracle");
+  });
+
+  test("uses XDG state fleet configs before legacy fleet configs", async () => {
+    writeFleet("47-mawjs", [{ name: "mawjs-oracle", repo: "Legacy/legacy-mawjs-oracle" }]);
+    writeStateFleet("47-mawjs", [{ name: "mawjs-oracle", repo: "State/state-mawjs-oracle" }]);
+    ghqFindMap["/state-mawjs-oracle"] = "/repos/State/state-mawjs-oracle";
+
+    await expect(resolveOracle("mawjs")).resolves.toEqual({
+      repoPath: "/repos/State/state-mawjs-oracle",
+      repoName: "state-mawjs-oracle",
+      parentDir: "/repos/State",
+    });
+    expect(ghqFindCalls).toEqual(["/state-mawjs-oracle"]);
   });
 
   test("surfaces ambiguous local oracle repos before remote fallbacks", async () => {

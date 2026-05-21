@@ -32,10 +32,7 @@ function prepareDbPath(): string {
   const file = messageLedgerDbPath();
   if (!existsSync(file)) {
     const legacy = legacyMessageLedgerDbPath();
-    if (existsSync(legacy)) {
-      mkdirSync(dirname(file), { recursive: true });
-      copyFileSync(legacy, file);
-    }
+    if (existsSync(legacy)) { mkdirSync(dirname(file), { recursive: true }); copyFileSync(legacy, file); }
   }
   return file;
 }

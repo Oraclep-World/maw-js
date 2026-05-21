@@ -11,10 +11,14 @@ import { join } from "path";
 const root = mkdtempSync(join(tmpdir(), "maw-registry-cache-"));
 const cacheFile = join(root, "oracles.json");
 const legacyCacheFile = join(root, "legacy-oracles.json");
+let activeCacheFile = cacheFile;
+let activeLegacyCacheFile = legacyCacheFile;
 
 mock.module(import.meta.resolve("../../src/core/fleet/registry-oracle-types.ts"), () => ({
   CACHE_FILE: cacheFile,
   LEGACY_CACHE_FILE: legacyCacheFile,
+  registryCacheFilePath: () => activeCacheFile,
+  legacyRegistryCacheFilePath: () => activeLegacyCacheFile,
   STALE_HOURS: 24,
 }));
 
@@ -33,6 +37,8 @@ function cache(overrides: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
+  activeCacheFile = cacheFile;
+  activeLegacyCacheFile = legacyCacheFile;
   rmSync(cacheFile, { force: true });
   rmSync(legacyCacheFile, { force: true });
   mkdirSync(root, { recursive: true });
@@ -96,6 +102,28 @@ describe("registry-oracle-cache", () => {
     expect(JSON.parse(readFileSync(cacheFile, "utf8"))).toMatchObject({
       legacyKey: "preserved",
       oracles: [{ name: "new", repo: "new-oracle" }],
+    });
+  });
+
+  test("default cache paths resolve when read and written", () => {
+    const dynamicRoot = join(root, "dynamic-cache");
+    activeCacheFile = join(dynamicRoot, "oracles.json");
+    activeLegacyCacheFile = join(dynamicRoot, "legacy-oracles.json");
+    mkdirSync(dynamicRoot, { recursive: true });
+    writeFileSync(activeLegacyCacheFile, JSON.stringify(cache({
+      legacyKey: "dynamic",
+      oracles: [{ name: "legacy-dynamic", repo: "legacy-dynamic-oracle" }],
+    })));
+
+    expect(readCache()?.oracles).toEqual([{ name: "legacy-dynamic", repo: "legacy-dynamic-oracle" }]);
+
+    writeCache(cache({ oracles: [{ name: "dynamic", repo: "dynamic-oracle" }] }));
+
+    expect(existsSync(cacheFile)).toBe(false);
+    expect(existsSync(activeCacheFile)).toBe(true);
+    expect(JSON.parse(readFileSync(activeCacheFile, "utf8"))).toMatchObject({
+      legacyKey: "dynamic",
+      oracles: [{ name: "dynamic", repo: "dynamic-oracle" }],
     });
   });
 });

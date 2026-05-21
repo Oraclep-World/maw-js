@@ -69,6 +69,8 @@ mock.module(verbosityPath, () => ({
 mock.module(registryTypesPath, () => ({
   CACHE_FILE: "/tmp/maw-test-oracles.json",
   LEGACY_CACHE_FILE: "/tmp/legacy-maw-test-oracles.json",
+  registryCacheFilePath: () => "/tmp/maw-test-oracles.json",
+  legacyRegistryCacheFilePath: () => "/tmp/legacy-maw-test-oracles.json",
 }));
 
 mock.module("maw-js/cli/parse-args", () => ({

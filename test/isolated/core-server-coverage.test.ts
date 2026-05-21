@@ -149,10 +149,14 @@ const original = {
   error: console.error,
   cli: process.env.MAW_CLI,
   ui: process.env.MAW_UI_DIR,
+  dataDir: process.env.MAW_DATA_DIR,
+  pluginsDir: process.env.MAW_PLUGINS_DIR,
 };
 
 beforeEach(() => {
   tmp = mkdtempSync(join(tmpdir(), "maw-core-server-"));
+  process.env.MAW_DATA_DIR = join(tmp, "data");
+  delete process.env.MAW_PLUGINS_DIR;
   config = { node: "local-node", oracle: "mawjs", peers: [{ host: "peer" }] };
   sessions = [{ name: "maw-pty-old" }, { name: "keeper" }, { name: "agent-view" }];
   serveCalls = [];
@@ -201,6 +205,8 @@ afterEach(() => {
   console.error = original.error;
   if (original.cli === undefined) delete process.env.MAW_CLI; else process.env.MAW_CLI = original.cli;
   if (original.ui === undefined) delete process.env.MAW_UI_DIR; else process.env.MAW_UI_DIR = original.ui;
+  if (original.dataDir === undefined) delete process.env.MAW_DATA_DIR; else process.env.MAW_DATA_DIR = original.dataDir;
+  if (original.pluginsDir === undefined) delete process.env.MAW_PLUGINS_DIR; else process.env.MAW_PLUGINS_DIR = original.pluginsDir;
   rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -222,7 +228,7 @@ describe("core server startup and routing", () => {
     expect(triggerListeners).toEqual([feedListeners]);
     expect(pluginLoads).toHaveLength(2);
     expect(manifestHookCalls).toBe(1);
-    expect(pluginWatchDirs[0]).toContain(".oracle");
+    expect(pluginWatchDirs[0]).toBe(join(tmp, "data", "plugins"));
     expect(VERSION).toStartWith("v");
     await pluginWatchCallbacks[0]("fresh.ts");
     expect(logs.join("\n")).toContain("fresh.ts changed");

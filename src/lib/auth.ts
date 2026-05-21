@@ -25,8 +25,15 @@ import { loadConfig } from "../config";
 const TOKEN_EXPIRY = 24 * 60 * 60 * 1000; // 24 hours
 
 /** Path to the persisted random secret (mode 0600). */
-export const AUTH_SECRET_FILE = mawStatePath("auth-secret");
-const LEGACY_AUTH_SECRET_FILE = mawConfigPath("auth-secret");
+export function authSecretFilePath(): string {
+  return mawStatePath("auth-secret");
+}
+
+function legacyAuthSecretFilePath(): string {
+  return mawConfigPath("auth-secret");
+}
+
+export const AUTH_SECRET_FILE = authSecretFilePath();
 
 let cachedSecret: string | null = null;
 
@@ -43,21 +50,23 @@ let cachedSecret: string | null = null;
 export function getJwtSecret(): string {
   if (process.env.MAW_JWT_SECRET) return process.env.MAW_JWT_SECRET;
   if (cachedSecret) return cachedSecret;
+  const authSecretFile = authSecretFilePath();
+  const legacyAuthSecretFile = legacyAuthSecretFilePath();
   try {
-    cachedSecret = readFileSync(AUTH_SECRET_FILE, "utf-8").trim();
+    cachedSecret = readFileSync(authSecretFile, "utf-8").trim();
     if (cachedSecret) return cachedSecret;
   } catch {
     // file missing or unreadable — try legacy config path before generating
   }
-  if (LEGACY_AUTH_SECRET_FILE !== AUTH_SECRET_FILE) {
+  if (legacyAuthSecretFile !== authSecretFile) {
     try {
-      const legacySecret = readFileSync(LEGACY_AUTH_SECRET_FILE, "utf-8").trim();
+      const legacySecret = readFileSync(legacyAuthSecretFile, "utf-8").trim();
       if (legacySecret) {
-        mkdirSync(dirname(AUTH_SECRET_FILE), { recursive: true });
-        writeFileSync(AUTH_SECRET_FILE, legacySecret, { mode: 0o600, flag: "w" });
-        try { chmodSync(AUTH_SECRET_FILE, 0o600); } catch { /* best-effort */ }
+        mkdirSync(dirname(authSecretFile), { recursive: true });
+        writeFileSync(authSecretFile, legacySecret, { mode: 0o600, flag: "w" });
+        try { chmodSync(authSecretFile, 0o600); } catch { /* best-effort */ }
         cachedSecret = legacySecret;
-        info(`[auth] migrated JWT secret → ${AUTH_SECRET_FILE} (mode 0600)`);
+        info(`[auth] migrated JWT secret → ${authSecretFile} (mode 0600)`);
         return legacySecret;
       }
     } catch {
@@ -65,13 +74,13 @@ export function getJwtSecret(): string {
     }
   }
   const fresh = randomBytes(32).toString("hex");
-  mkdirSync(dirname(AUTH_SECRET_FILE), { recursive: true });
-  writeFileSync(AUTH_SECRET_FILE, fresh, { mode: 0o600, flag: "w" });
+  mkdirSync(dirname(authSecretFile), { recursive: true });
+  writeFileSync(authSecretFile, fresh, { mode: 0o600, flag: "w" });
   // chmod is a belt-and-suspenders for filesystems where the open-time mode
   // isn't honored (umask-stripped, NFS, etc).
-  try { chmodSync(AUTH_SECRET_FILE, 0o600); } catch { /* best-effort */ }
+  try { chmodSync(authSecretFile, 0o600); } catch { /* best-effort */ }
   cachedSecret = fresh;
-  info(`[auth] generated random JWT secret → ${AUTH_SECRET_FILE} (mode 0600)`);
+  info(`[auth] generated random JWT secret → ${authSecretFile} (mode 0600)`);
   return fresh;
 }
 

@@ -14,6 +14,7 @@ import {
 const originalMawHome = process.env.MAW_HOME;
 const originalMawConfigDir = process.env.MAW_CONFIG_DIR;
 const originalMawStateDir = process.env.MAW_STATE_DIR;
+const originalXdgConfigHome = process.env.XDG_CONFIG_HOME;
 
 let tempRoot = "";
 
@@ -24,6 +25,8 @@ function resetEnv() {
   else process.env.MAW_CONFIG_DIR = originalMawConfigDir;
   if (originalMawStateDir === undefined) delete process.env.MAW_STATE_DIR;
   else process.env.MAW_STATE_DIR = originalMawStateDir;
+  if (originalXdgConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
+  else process.env.XDG_CONFIG_HOME = originalXdgConfigHome;
 }
 
 beforeEach(() => {
@@ -31,6 +34,7 @@ beforeEach(() => {
   delete process.env.MAW_HOME;
   delete process.env.MAW_CONFIG_DIR;
   delete process.env.MAW_STATE_DIR;
+  delete process.env.XDG_CONFIG_HOME;
 });
 
 afterEach(() => {
@@ -52,6 +56,13 @@ describe("scope path helpers", () => {
 
     expect(scopesDir()).toBe(join(tempRoot, "config-dir", "scopes"));
     expect(scopePath("team.alpha")).toBe(join(tempRoot, "config-dir", "scopes", "team.alpha.json"));
+  });
+
+  test("falls back through the shared XDG config resolver", () => {
+    process.env.XDG_CONFIG_HOME = join(tempRoot, "xdg-config");
+
+    expect(scopesDir()).toBe(join(tempRoot, "xdg-config", "maw", "scopes"));
+    expect(scopePath("dev")).toBe(join(tempRoot, "xdg-config", "maw", "scopes", "dev.json"));
   });
 });
 

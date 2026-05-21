@@ -50,6 +50,7 @@ const {
 const CONFIG_FILE = join(TEST_CONFIG_DIR, "maw.config.json");
 const ORACLES_JSON = join(TEST_CACHE_DIR, "oracles.json");
 const ORACLE_BIRTHS_JSON = join(TEST_CACHE_DIR, "oracle-births.json");
+const LEGACY_ORACLE_BIRTHS_JSON = join(TEST_CONFIG_DIR, "oracle-births.json");
 
 afterAll(() => {
   rmSync(TEST_CONFIG_DIR, { recursive: true, force: true });
@@ -60,7 +61,7 @@ beforeEach(() => {
   // Wipe all 5 file-backed registries between tests (config.agents
   // pre-population is recomputed on every loadConfig() call).
   mkdirSync(TEST_CACHE_DIR, { recursive: true });
-  for (const f of [CONFIG_FILE, ORACLES_JSON, ORACLE_BIRTHS_JSON]) {
+  for (const f of [CONFIG_FILE, ORACLES_JSON, ORACLE_BIRTHS_JSON, LEGACY_ORACLE_BIRTHS_JSON]) {
     try { rmSync(f, { force: true }); } catch { /* missing is fine */ }
   }
   // Wipe fleet dir.
@@ -107,6 +108,10 @@ function writeOraclesJson(oracles: any[]) {
 
 function writeOracleBirths(body: Record<string, unknown>) {
   writeFileSync(ORACLE_BIRTHS_JSON, JSON.stringify(body, null, 2) + "\n", "utf-8");
+}
+
+function writeLegacyOracleBirths(body: Record<string, unknown>) {
+  writeFileSync(LEGACY_ORACLE_BIRTHS_JSON, JSON.stringify(body, null, 2) + "\n", "utf-8");
 }
 
 function makeOraclesEntry(o: Partial<any> & { name: string }) {
@@ -256,6 +261,46 @@ describe("loadManifest — aggregates from all sources", () => {
         iso: "2026-04-17T16:45:01+07:00",
         source: "git-claudemd",
         cached_at: "2026-05-12T21:56:03.873Z",
+      },
+    });
+  });
+
+  test("loadOracleBirths falls back to config-path birth caches when cache path is empty", () => {
+    writeLegacyOracleBirths({
+      version: 1,
+      entries: {
+        oldbud: {
+          iso: "2026-05-01T00:00:00+07:00",
+          source: "legacy-config-cache",
+          cached_at: "2026-05-12T21:56:03.246Z",
+        },
+      },
+    });
+
+    expect(loadOracleBirths()).toEqual({
+      oldbud: {
+        iso: "2026-05-01T00:00:00+07:00",
+        source: "legacy-config-cache",
+        cached_at: "2026-05-12T21:56:03.246Z",
+      },
+    });
+
+    writeOracleBirths({
+      version: 1,
+      entries: {
+        newbud: {
+          iso: "2026-05-02T00:00:00+07:00",
+          source: "xdg-cache",
+          cached_at: "2026-05-12T21:56:03.246Z",
+        },
+      },
+    });
+
+    expect(loadOracleBirths()).toEqual({
+      newbud: {
+        iso: "2026-05-02T00:00:00+07:00",
+        source: "xdg-cache",
+        cached_at: "2026-05-12T21:56:03.246Z",
       },
     });
   });

@@ -2,9 +2,9 @@ import type { FeedEvent } from "maw-js/lib/feed";
 import { isMessageLifecycleData, type MessageDirection, type MessageState } from "maw-js/lib/message-events";
 import type { InvokeContext, InvokeResult } from "maw-js/plugin/types";
 import { listMessageLedgerEvents, messageLedgerDbPath, recordMessageLedgerEvent, type MessageLedgerQuery } from "./ledger";
+import { mawStatePath } from "../../../core/xdg";
 import { spawn } from "child_process";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from "fs";
-import { homedir } from "os";
 import { join } from "path";
 
 const ENGINE_PREFIX = "/api/message-ledger";
@@ -113,12 +113,8 @@ function parsePort(args: string[]): number {
   return port;
 }
 
-function activeMawHome(): string {
-  return process.env.MAW_HOME || join(homedir(), ".maw");
-}
-
 function supervisorDir(): string {
-  return join(activeMawHome(), "engine-plugins");
+  return mawStatePath("engine-plugins");
 }
 
 function pidPath(): string {

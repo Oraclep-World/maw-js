@@ -218,6 +218,36 @@ describe("wake maybe split/window coverage", () => {
     expect(output()).not.toContain("MAW_FORCE_SPLIT=1");
   });
 
+  test("MAW_SAFE_SPLIT reuses an existing target window in the destination session", async () => {
+    paneCommandResponse = "2.1.139";
+    process.env.MAW_SAFE_SPLIT = "1";
+
+    await maybeSplit("50-mawjs:mawjs-features", {
+      split: true,
+      splitTarget: "50-mawjs:mawjs-oracle",
+    });
+
+    expect(hostExecCalls.some(cmd => cmd.includes("tmux link-window"))).toBe(false);
+    expect(hostExecCalls.some(cmd => cmd.includes("tmux new-window"))).toBe(false);
+    expect(output()).toContain("target tab already in this session — 50-mawjs:mawjs-features");
+    expect(output()).toContain("target already in background tab");
+  });
+
+  test("MAW_SAFE_SPLIT links a cross-session target as a background tab when possible", async () => {
+    paneCommandResponse = "2.1.139";
+    process.env.MAW_SAFE_SPLIT = "1";
+
+    await maybeSplit("20-homekeeper:homekeeper-oracle", {
+      split: true,
+      splitTarget: "50-mawjs:mawjs-oracle",
+    });
+
+    expect(hostExecCalls.some(cmd => cmd.includes("tmux link-window -d -s '20-homekeeper:homekeeper-oracle' -t '50-mawjs:'"))).toBe(true);
+    expect(hostExecCalls.some(cmd => cmd.includes("tmux new-window"))).toBe(false);
+    expect(output()).toContain("linked background tab — 20-homekeeper:homekeeper-oracle");
+    expect(output()).toContain("linked as background tab");
+  });
+
   test("Claude-like bring to an existing window in the same session still refuses nested split (#1835)", async () => {
     paneCommandResponse = "2.1.139";
     paneSessionWindowResponse = "50-mawjs:mawjs-oracle";

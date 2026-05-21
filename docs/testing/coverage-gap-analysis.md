@@ -1,28 +1,28 @@
 # Coverage gap analysis
 
-Generated: 2026-05-20T10:49:08.437Z
+Generated: 2026-05-21T02:08:37.099Z
 
 Input: `coverage/lcov.info`
 
 Coverage scope: source-line-normalized Bun LCOV plus zero-coverage accounting for tracked `src/**/*.ts` files absent from LCOV.
 Excluded from Bun LCOV accounting: non-Bun-runtime AssemblyScript sources compiled to WebAssembly and covered by AssemblyScript harness tests instead of Bun line instrumentation.
 
-Overall line coverage: **100.0%** (31620/31621)
-Overall function coverage: **100.0%** (5370/5370)
+Overall line coverage: **100.0%** (32561/32561)
+Overall function coverage: **100.0%** (5553/5553)
 
 ## Module summary
 
 | Module | Files | Missing from LCOV | Lines | Functions | Branches |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| cli/dispatch | 95 | 0 | 100.0% (5857/5858) | 100.0% (938/938) | n/a (0/0) |
-| config/runtime | 19 | 0 | 100.0% (780/780) | 100.0% (135/135) | n/a (0/0) |
-| fleet | 19 | 0 | 100.0% (680/680) | 100.0% (108/108) | n/a (0/0) |
+| cli/dispatch | 95 | 0 | 100.0% (6123/6123) | 100.0% (982/982) | n/a (0/0) |
+| config/runtime | 19 | 0 | 100.0% (799/799) | 100.0% (140/140) | n/a (0/0) |
+| fleet | 20 | 0 | 100.0% (728/728) | 100.0% (121/121) | n/a (0/0) |
 | matcher | 3 | 0 | 100.0% (73/73) | 100.0% (18/18) | n/a (0/0) |
-| other | 175 | 5 | 100.0% (8925/8925) | 100.0% (1567/1567) | n/a (0/0) |
+| other | 175 | 5 | 100.0% (9198/9198) | 100.0% (1611/1611) | n/a (0/0) |
 | plugin dispatch | 15 | 1 | 100.0% (705/705) | 100.0% (91/91) | n/a (0/0) |
-| routing/aliases | 4 | 0 | 100.0% (431/431) | 100.0% (76/76) | n/a (0/0) |
-| transport | 28 | 0 | 100.0% (1698/1698) | 100.0% (454/454) | n/a (0/0) |
-| vendor plugins | 247 | 2 | 100.0% (12471/12471) | 100.0% (1983/1983) | n/a (0/0) |
+| routing/aliases | 4 | 0 | 100.0% (453/453) | 100.0% (78/78) | n/a (0/0) |
+| transport | 28 | 0 | 100.0% (1721/1721) | 100.0% (457/457) | n/a (0/0) |
+| vendor plugins | 247 | 2 | 100.0% (12761/12761) | 100.0% (2055/2055) | n/a (0/0) |
 
 ## Source handled outside Bun LCOV
 
@@ -36,7 +36,6 @@ Overall function coverage: **100.0%** (5370/5370)
 
 | Rank | Risk | Module | File | Uncovered | Line coverage | Function coverage | Note |
 | ---: | --- | --- | --- | ---: | ---: | ---: | --- |
-| 1 | critical | cli/dispatch | `src/commands/shared/federation-sync-cli.ts` | 1 | 98.9% | 100.0% | partial coverage |
 
 ## Critical files at or above the 80% line target
 
@@ -78,7 +77,7 @@ Overall function coverage: **100.0%** (5370/5370)
 | cli/dispatch | `src/commands/shared/federation-diff.ts` | 100.0% | 100.0% |
 | cli/dispatch | `src/commands/shared/federation-fetch.ts` | 100.0% | 100.0% |
 | cli/dispatch | `src/commands/shared/federation-identity.ts` | 100.0% | 100.0% |
-| cli/dispatch | `src/commands/shared/federation-sync-cli.ts` | 98.9% | 100.0% |
+| cli/dispatch | `src/commands/shared/federation-sync-cli.ts` | 100.0% | 100.0% |
 | cli/dispatch | `src/commands/shared/federation-sync.ts` | 100.0% | 100.0% |
 | cli/dispatch | `src/commands/shared/federation.ts` | 100.0% | 100.0% |
 | cli/dispatch | `src/commands/shared/fleet-doctor-checks-repo.ts` | 100.0% | 100.0% |
@@ -143,6 +142,7 @@ Overall function coverage: **100.0%** (5370/5370)
 | fleet | `src/core/fleet/nicknames.ts` | 100.0% | 100.0% |
 | fleet | `src/core/fleet/node-identity.ts` | 100.0% | 100.0% |
 | fleet | `src/core/fleet/oracle-registry.ts` | 100.0% | 100.0% |
+| fleet | `src/core/fleet/paths.ts` | 100.0% | 100.0% |
 | fleet | `src/core/fleet/registry-oracle-cache.ts` | 100.0% | 100.0% |
 | fleet | `src/core/fleet/registry-oracle-orchestrate.ts` | 100.0% | 100.0% |
 | fleet | `src/core/fleet/registry-oracle-scan-local.ts` | 100.0% | 100.0% |
@@ -213,7 +213,7 @@ Overall function coverage: **100.0%** (5370/5370)
 
 ## Critical gaps to prioritize
 
-- `src/commands/shared/federation-sync-cli.ts` (cli/dispatch): 1 uncovered lines, 98.9% line coverage.
+No critical files appeared in the top 20 uncovered files.
 
 ## Prioritization guidance
 

@@ -3,14 +3,12 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from "os";
 import { join } from "path";
 
-let fleetEntries: Array<{ num: number; file: string; session: { name: string } }> = [];
+let fleetEntries: Array<{ num: number; file: string; path?: string; session: { name: string } }> = [];
 const fleetDir = join(tmpdir(), `maw-bud-init-fleet-${process.pid}`);
 
 mock.module("maw-js/commands/shared/fleet-load", () => ({
+  fleetDirForWrite: () => fleetDir,
   loadFleetEntries: () => fleetEntries,
-}));
-mock.module("maw-js/sdk", () => ({
-  FLEET_DIR: fleetDir,
 }));
 
 const { configureFleet, generateClaudeMd, initVault, writeBirthNote } = await import("../../src/vendor/mpr-plugins/bud/bud-init.ts?bud-init-coverage");
@@ -112,5 +110,23 @@ describe("bud init helper coverage", () => {
     cfg = JSON.parse(readFileSync(file, "utf-8"));
     expect(cfg.budded_from).toBe("mawjs");
     expect(existed.logs.join("\n")).toContain("fleet config exists");
+  });
+
+  test("configureFleet updates the loaded source path for migrated fleet entries", () => {
+    const stateFleetDir = mkdtempSync(join(tmpdir(), "maw-bud-init-state-fleet-"));
+    try {
+      const stateFile = join(stateFleetDir, "12-leaf.json");
+      const legacyFile = join(fleetDir, "12-leaf.json");
+      writeFileSync(stateFile, JSON.stringify({ name: "12-leaf", windows: [] }), "utf-8");
+      fleetEntries = [{ num: 12, file: "12-leaf.json", path: stateFile, session: { name: "12-leaf" } }];
+
+      const updated = captureLogs(() => configureFleet("leaf", "org", "repo", "mawjs"));
+
+      expect(updated.result).toBe(stateFile);
+      expect(JSON.parse(readFileSync(stateFile, "utf-8")).budded_from).toBe("mawjs");
+      expect(existsSync(legacyFile)).toBe(false);
+    } finally {
+      rmSync(stateFleetDir, { recursive: true, force: true });
+    }
   });
 });

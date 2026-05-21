@@ -19,6 +19,9 @@ const pane = (id: string, target: string, command = "claude", title = id): TmuxP
 
 describe("cleanup zombie pane classifier coverage", () => {
   const originalHome = process.env.HOME;
+  const originalCacheDir = process.env.MAW_CACHE_DIR;
+  const originalConfigDir = process.env.MAW_CONFIG_DIR;
+  const originalMawHome = process.env.MAW_HOME;
   let dir: string;
   let teamsDir: string;
   let cleanupModule: CleanupModule;
@@ -27,6 +30,9 @@ describe("cleanup zombie pane classifier coverage", () => {
     dir = mkdtempSync(join(tmpdir(), "maw-cleanup-zombies-"));
     teamsDir = join(dir, "teams");
     process.env.HOME = dir;
+    delete process.env.MAW_CACHE_DIR;
+    delete process.env.MAW_CONFIG_DIR;
+    delete process.env.MAW_HOME;
     _setDirs(teamsDir, join(dir, "tasks"));
     cleanupModule = await import("../../src/vendor/mpr-plugins/cleanup/internal/team-cleanup-zombies");
   });
@@ -34,6 +40,12 @@ describe("cleanup zombie pane classifier coverage", () => {
   afterEach(() => {
     if (originalHome === undefined) delete process.env.HOME;
     else process.env.HOME = originalHome;
+    if (originalCacheDir === undefined) delete process.env.MAW_CACHE_DIR;
+    else process.env.MAW_CACHE_DIR = originalCacheDir;
+    if (originalConfigDir === undefined) delete process.env.MAW_CONFIG_DIR;
+    else process.env.MAW_CONFIG_DIR = originalConfigDir;
+    if (originalMawHome === undefined) delete process.env.MAW_HOME;
+    else process.env.MAW_HOME = originalMawHome;
     rmSync(dir, { recursive: true, force: true });
   });
 
@@ -80,6 +92,23 @@ describe("cleanup zombie pane classifier coverage", () => {
         info: 'deleted:2.3  "this is an orphaned agent pane with a long title t"',
       },
     ]);
+  });
+
+
+  test("uses the XDG cache registry when exempting deactivated oracle sessions", () => {
+    process.env.MAW_CACHE_DIR = join(dir, "cache");
+    mkdirSync(join(dir, "cache"), { recursive: true });
+    writeFileSync(join(dir, "cache", "oracles.json"), JSON.stringify({
+      oracles: [{ name: "registered" }],
+    }));
+
+    const { findZombiePanes } = cleanupModule;
+    const zombies = findZombiePanes([
+      pane("%registry", "28-registered:4.1", "claude", "registered oracle"),
+      pane("%zombie", "deleted:2.3", "claude", "orphan"),
+    ]);
+
+    expect(zombies.map((z) => z.paneId)).toEqual(["%zombie"]);
   });
 
   test("falls back cleanly when team and oracle registries are absent", () => {

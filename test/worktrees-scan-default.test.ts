@@ -181,6 +181,42 @@ describe("scanWorktrees default-suite coverage", () => {
     expect(errors.join("\n")).toContain("beta-tile");
   });
 
+  test("loads fleet metadata from XDG state dirs before legacy fleet dirs", async () => {
+    const path = wtPath("Org", "state-oracle", "1-xdg");
+    const info = derived(path);
+
+    const deps = makeDeps({
+      findPaths: [path],
+    });
+    deps.fleetDirs = ["/state/fleet", "/legacy/fleet"];
+    deps.readdirSync = (dir) => {
+      if (dir === "/state/fleet") return ["01-state.json"];
+      if (dir === "/legacy/fleet") return ["01-state.json", "99-legacy.json"];
+      return [];
+    };
+    deps.readFileSync = (filePath) => {
+      if (filePath === "/state/fleet/01-state.json") {
+        return JSON.stringify({ windows: [{ repo: info.repo }] });
+      }
+      if (filePath === "/legacy/fleet/01-state.json") {
+        throw new Error("duplicate legacy file should be skipped");
+      }
+      if (filePath === "/legacy/fleet/99-legacy.json") {
+        return JSON.stringify({ windows: [{ repo: info.repo }] });
+      }
+      return "{}";
+    };
+
+    const results = await scanWorktrees(deps);
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      path,
+      repo: info.repo,
+      fleetFile: "01-state.json",
+    });
+  });
+
   test("returns an empty list when the worktree discovery command fails", async () => {
     await expect(scanWorktrees(makeDeps({ findThrows: true }))).resolves.toEqual([]);
   });

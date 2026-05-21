@@ -29,6 +29,7 @@ let resolveCalls: ResolveCall[] = [];
 let spawnCalls: string[][] = [];
 let spawnExitCode = 0;
 let spawnStdout = "";
+let spawnThrowsOnPipe = false;
 let logs: string[] = [];
 let errors: string[] = [];
 
@@ -76,6 +77,7 @@ beforeEach(() => {
   spawnCalls = [];
   spawnExitCode = 0;
   spawnStdout = "";
+  spawnThrowsOnPipe = false;
   logs = [];
   errors = [];
 
@@ -88,6 +90,7 @@ beforeEach(() => {
   Bun.spawn = ((cmd: string[], opts?: { stdin?: string; stdout?: string; stderr?: string }) => {
     spawnCalls.push([...cmd]);
     if (opts?.stdout === "pipe") {
+      if (spawnThrowsOnPipe) throw new Error("tmux display failed");
       return {
         stdout: new Response(spawnStdout).body,
         exited: Promise.resolve(spawnExitCode),
@@ -213,6 +216,36 @@ describe("attach impl command routing", () => {
     expect(logs.join("\n")).toContain("50-mawjs:mawjs-oracle-shell");
   });
 
+  test("dry-runs shell plans and falls back to split when Claude-like pane probing fails", async () => {
+    fleet = [{ name: "50-mawjs", windows: [{ name: "mawjs-oracle", repo: "Soul-Brews-Studio/mawjs-oracle" }] }];
+    resolveQueue = [{ tier: 1, sessionName: "50-mawjs" }];
+
+    await cmdAttach("mawjs-oracle", { shell: true, dryRun: true });
+
+    expect(logs.join("\n")).toContain("[dry-run] shell — would open split shell pane in 50-mawjs");
+    expect(spawnCalls).toEqual([]);
+
+    logs = [];
+    process.env.TMUX_PANE = "%42";
+    spawnThrowsOnPipe = true;
+    resolveQueue = [{ tier: 1, sessionName: "50-mawjs" }];
+
+    await cmdAttach("mawjs-oracle", { shell: true });
+
+    expect(spawnCalls[0]).toEqual(["tmux", "display-message", "-p", "-t", "%42", "#{pane_current_command}"]);
+    expect(spawnCalls[1]).toEqual([
+      "tmux",
+      "split-window",
+      "-t",
+      "50-mawjs:mawjs-oracle",
+      "-h",
+      "-l",
+      "50%",
+      expect.stringContaining("Soul-Brews-Studio/mawjs-oracle"),
+    ]);
+    expect(logs.join("\n")).toContain("split shell pane");
+  });
+
   test("--shell --no-split opens a named shell window in the target session", async () => {
     fleet = [{ name: "50-mawjs", windows: [{ name: "mawjs-oracle", repo: "Soul-Brews-Studio/mawjs-oracle" }] }];
     resolveQueue = [{ tier: 1, sessionName: "50-mawjs" }];
@@ -267,5 +300,51 @@ describe("attach impl command routing", () => {
     ]);
     expect(logs.join("\n")).toContain("waking sleepy");
     expect(logs.join("\n")).toContain("attaching to sleepy");
+  });
+
+  test("opens shell after wake-created and sleeping fleet sessions", async () => {
+    fleet = [{ name: "50-mawjs", windows: [{ name: "mawjs-oracle", repo: "Soul-Brews-Studio/mawjs-oracle" }] }];
+    resolveQueue = [null, { tier: 1, sessionName: "50-mawjs" }];
+
+    await cmdAttach("mawjs-oracle", { shell: true });
+
+    expect(resolveCalls).toEqual([
+      expect.objectContaining({ target: "mawjs-oracle", opts: {} }),
+      expect.objectContaining({ target: "mawjs-oracle", opts: { fuzzy: true } }),
+    ]);
+    expect(spawnCalls).toEqual([
+      ["maw", "wake", "mawjs-oracle"],
+      [
+        "tmux",
+        "split-window",
+        "-t",
+        "50-mawjs:mawjs-oracle",
+        "-h",
+        "-l",
+        "50%",
+        expect.stringContaining("Soul-Brews-Studio/mawjs-oracle"),
+      ],
+    ]);
+
+    logs = [];
+    spawnCalls = [];
+    resolveQueue = [{ tier: 2, fleetName: "50-mawjs" }];
+
+    await cmdAttach("mawjs-oracle", { shell: true, yes: true });
+
+    expect(spawnCalls).toEqual([
+      ["maw", "wake", "50-mawjs"],
+      [
+        "tmux",
+        "split-window",
+        "-t",
+        "50-mawjs:mawjs-oracle",
+        "-h",
+        "-l",
+        "50%",
+        expect.stringContaining("Soul-Brews-Studio/mawjs-oracle"),
+      ],
+    ]);
+    expect(logs.join("\n")).toContain("waking 50-mawjs");
   });
 });

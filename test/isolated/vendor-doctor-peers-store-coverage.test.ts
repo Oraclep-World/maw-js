@@ -19,6 +19,9 @@ import {
 describe("doctor vendor peers store coverage", () => {
   const originalPeersFile = process.env.PEERS_FILE;
   const originalTtl = process.env.MAW_PEER_STALE_TTL_MS;
+  const originalHome = process.env.HOME;
+  const originalMawHome = process.env.MAW_HOME;
+  const originalStateDir = process.env.MAW_STATE_DIR;
   let dir: string;
   let file: string;
 
@@ -34,6 +37,12 @@ describe("doctor vendor peers store coverage", () => {
     else process.env.PEERS_FILE = originalPeersFile;
     if (originalTtl === undefined) delete process.env.MAW_PEER_STALE_TTL_MS;
     else process.env.MAW_PEER_STALE_TTL_MS = originalTtl;
+    if (originalHome === undefined) delete process.env.HOME;
+    else process.env.HOME = originalHome;
+    if (originalMawHome === undefined) delete process.env.MAW_HOME;
+    else process.env.MAW_HOME = originalMawHome;
+    if (originalStateDir === undefined) delete process.env.MAW_STATE_DIR;
+    else process.env.MAW_STATE_DIR = originalStateDir;
     rmSync(dir, { recursive: true, force: true });
   });
 
@@ -117,6 +126,24 @@ describe("doctor vendor peers store coverage", () => {
 
     expect(Object.keys(recovered.peers)).toEqual(["recovered"]);
     expect(loadPeers().peers.recovered.url).toBe("http://recovered");
+  });
+
+  test("reads legacy ~/.maw peers when the XDG state store is absent", () => {
+    delete process.env.PEERS_FILE;
+    delete process.env.MAW_HOME;
+    process.env.HOME = join(dir, "home");
+    process.env.MAW_STATE_DIR = join(dir, "state");
+    const legacyDir = join(process.env.HOME, ".maw");
+    mkdirSync(legacyDir, { recursive: true });
+    writeFileSync(join(legacyDir, "peers.json"), JSON.stringify({
+      version: 1,
+      peers: {
+        legacy: { url: "http://legacy", node: null, addedAt: "2026-05-18T00:00:00.000Z", lastSeen: null },
+      },
+    }));
+
+    expect(peersPath()).toBe(join(dir, "state", "peers.json"));
+    expect(loadPeers().peers.legacy.url).toBe("http://legacy");
   });
 
   test("clearStaleTmp is best effort", () => {

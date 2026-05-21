@@ -3,8 +3,9 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
-const tmpConfigDir = mkdtempSync(join(tmpdir(), "maw-hub-config-test-"));
-process.env.MAW_CONFIG_DIR = tmpConfigDir;
+const tmpRoot = mkdtempSync(join(tmpdir(), "maw-hub-config-test-"));
+process.env.MAW_CONFIG_DIR = join(tmpRoot, "config");
+process.env.MAW_DATA_DIR = join(tmpRoot, "data");
 
 const { WORKSPACES_DIR, loadWorkspaceConfigs, validateWorkspaceConfig } = await import("../../src/transports/hub-config");
 
@@ -36,5 +37,35 @@ describe("hub workspace config validation (#1521)", () => {
       console.warn = originalWarn;
     }
     expect(warnings.join("\n")).toContain("[hub] invalid workspace config: bad.json (hubUrl must be ws:|wss: (got http:))");
+  });
+
+  test("loads workspace configs from data before legacy config fallback", () => {
+    const legacyDir = join(process.env.MAW_CONFIG_DIR!, "workspaces");
+    mkdirSync(legacyDir, { recursive: true });
+    mkdirSync(WORKSPACES_DIR, { recursive: true });
+
+    writeFileSync(join(legacyDir, "legacy.json"), JSON.stringify({
+      id: "legacy",
+      hubUrl: "wss://legacy.example.test",
+      token: "legacy-token",
+      sharedAgents: ["legacy"],
+    }));
+    writeFileSync(join(legacyDir, "shared.json"), JSON.stringify({
+      id: "shared",
+      hubUrl: "wss://legacy-shared.example.test",
+      token: "legacy-shared-token",
+      sharedAgents: ["legacy"],
+    }));
+    writeFileSync(join(WORKSPACES_DIR, "shared.json"), JSON.stringify({
+      id: "shared",
+      hubUrl: "wss://data-shared.example.test",
+      token: "data-shared-token",
+      sharedAgents: ["data"],
+    }));
+
+    expect(loadWorkspaceConfigs()).toEqual([
+      { id: "legacy", hubUrl: "wss://legacy.example.test", token: "legacy-token", sharedAgents: ["legacy"] },
+      { id: "shared", hubUrl: "wss://data-shared.example.test", token: "data-shared-token", sharedAgents: ["data"] },
+    ]);
   });
 });

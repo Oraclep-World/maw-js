@@ -110,14 +110,14 @@ async function withImmediateTimers(fn: () => Promise<void>): Promise<number[]> {
 describe("done autosave coverage", () => {
   test("signalParentInbox writes a sanitized parent inbox signal and no-ops when no parent exists", async () => {
     await signalParentInbox("tile-1", "missing", []);
-    expect(() => readFileSync(join(homeDir, ".oracle", "inbox", "leadpane.jsonl"), "utf-8")).toThrow();
+    expect(() => readFileSync(join(homeDir, ".maw", "inbox", "leadpane.jsonl"), "utf-8")).toThrow();
 
     process.env.CLAUDE_AGENT_NAME = "agent/oracle";
     await signalParentInbox("tile-1", "work", [
       { name: "work", windows: [{ index: 0, name: "lead pane!!", active: true }] },
     ]);
 
-    const inboxFile = join(homeDir, ".oracle", "inbox", "leadpane.jsonl");
+    const inboxFile = join(homeDir, ".maw", "inbox", "leadpane.jsonl");
     const signal = JSON.parse(readFileSync(inboxFile, "utf-8").trim());
     expect(Number.isNaN(Date.parse(signal.ts))).toBe(false);
     expect(signal).toMatchObject({

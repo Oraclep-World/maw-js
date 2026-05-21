@@ -107,6 +107,37 @@ describe("small API routers default-suite coverage", () => {
     expect(reads).toEqual(["/fleet/m5.json"]);
   });
 
+  test("fleet API reads XDG state fleet configs before legacy fallback configs", async () => {
+    const reads: string[] = [];
+    const app = apiWith(createFleetApi({
+      fleetDir: "/legacy/fleet",
+      fleetDirs: ["/state/fleet", "/legacy/fleet"],
+      readdirSync: (dir) => {
+        if (dir === "/state/fleet") return ["01-state.json", "ignored.json.disabled"] as any;
+        if (dir === "/legacy/fleet") return ["01-state.json", "02-legacy.json"] as any;
+        return [] as any;
+      },
+      readFileSync: (path) => {
+        reads.push(String(path));
+        if (path === "/state/fleet/01-state.json") return JSON.stringify({ node: "state" });
+        if (path === "/legacy/fleet/01-state.json") throw new Error("duplicate legacy file should be skipped");
+        if (path === "/legacy/fleet/02-legacy.json") return JSON.stringify({ node: "legacy" });
+        return "{}";
+      },
+      join: (...parts) => parts.join("/"),
+    }));
+
+    const res = await app.handle(new Request("http://local/api/fleet-config"));
+    expect(res.status).toBe(200);
+    expect(await json(res)).toEqual({
+      configs: [{ node: "state" }, { node: "legacy" }],
+    });
+    expect(reads).toEqual([
+      "/state/fleet/01-state.json",
+      "/legacy/fleet/02-legacy.json",
+    ]);
+  });
+
   test("fleet API returns an empty config list with an error when IO fails", async () => {
     const app = apiWith(createFleetApi({
       fleetDir: "/fleet",

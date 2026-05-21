@@ -66,6 +66,34 @@ describe("oracle manifest function coverage", () => {
     expect(manifest.readFleetWindows(TEST_FLEET_DIR)).toEqual([{ name: "sess", windows: [{ name: "neo-oracle" }] }]);
   });
 
+  test("readFleetWindows reads state-first dirs and skips duplicate legacy files", () => {
+    const stateFleetDir = join(TEST_CONFIG_DIR, "state-fleet");
+    const legacyFleetDir = join(TEST_CONFIG_DIR, "legacy-fleet");
+    mkdirSync(stateFleetDir, { recursive: true });
+    mkdirSync(legacyFleetDir, { recursive: true });
+
+    writeFileSync(
+      join(stateFleetDir, "001-shared.json"),
+      JSON.stringify({ name: "state-session", windows: [{ name: "state-oracle" }] }),
+      "utf8",
+    );
+    writeFileSync(
+      join(legacyFleetDir, "001-shared.json"),
+      "{bad duplicate legacy json",
+      "utf8",
+    );
+    writeFileSync(
+      join(legacyFleetDir, "002-legacy.json"),
+      JSON.stringify({ name: "legacy-session", windows: [{ name: "legacy-oracle" }] }),
+      "utf8",
+    );
+
+    expect(manifest.readFleetWindows([stateFleetDir, legacyFleetDir])).toEqual([
+      { name: "state-session", windows: [{ name: "state-oracle" }] },
+      { name: "legacy-session", windows: [{ name: "legacy-oracle" }] },
+    ]);
+  });
+
   test("sync, cached, lookup, and direct oracles-json merge cover precedence branches", () => {
     writeFleet("010-neo.json", { name: "fleet-session", windows: [
       { name: "neo-oracle", repo: "fleet/repo" },

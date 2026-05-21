@@ -25,9 +25,9 @@ process.env.MAW_STATE_DIR = TEST_STATE_DIR;
 delete process.env.MAW_PEER_KEY;
 delete process.env.MAW_HOME;
 
-// Import after env is set so PEER_KEY_FILE resolves to TEST_STATE_DIR.
+// Import after env is set so compatibility PEER_KEY_FILE resolves to TEST_STATE_DIR.
 const peerKey = await import("../../src/lib/peer-key.ts?peer-key-persist");
-const { PEER_KEY_FILE, getPeerKey, resetPeerKeyCache } = peerKey;
+const { PEER_KEY_FILE, peerKeyFilePath, getPeerKey, resetPeerKeyCache } = peerKey;
 const LEGACY_PEER_KEY_FILE = join(TEST_CONFIG_DIR, "peer-key");
 
 afterAll(() => {
@@ -47,6 +47,28 @@ beforeEach(() => {
 describe("getPeerKey() — #804 random + persisted peer key", () => {
   test("PEER_KEY_FILE resolves under the test state dir (env wiring sanity)", () => {
     expect(PEER_KEY_FILE).toBe(join(TEST_STATE_DIR, "peer-key"));
+    expect(peerKeyFilePath()).toBe(PEER_KEY_FILE);
+  });
+
+  test("resolves MAW_STATE_DIR at peer-key access time", () => {
+    const dynamicState = mkdtempSync(join(tmpdir(), "maw-peer-key-dynamic-state-"));
+    process.env.MAW_STATE_DIR = dynamicState;
+    resetPeerKeyCache();
+    try {
+      const dynamicFile = join(dynamicState, "peer-key");
+      expect(peerKeyFilePath()).toBe(dynamicFile);
+      expect(existsSync(dynamicFile)).toBe(false);
+
+      const key = getPeerKey();
+
+      expect(key).toMatch(/^[0-9a-f]{64}$/);
+      expect(readFileSync(dynamicFile, "utf-8")).toBe(key);
+      expect(existsSync(PEER_KEY_FILE)).toBe(false);
+    } finally {
+      process.env.MAW_STATE_DIR = TEST_STATE_DIR;
+      resetPeerKeyCache();
+      rmSync(dynamicState, { recursive: true, force: true });
+    }
   });
 
   test("missing file → creates 64-char hex key and persists it", () => {

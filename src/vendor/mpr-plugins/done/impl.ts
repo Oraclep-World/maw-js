@@ -1,7 +1,6 @@
 import { join } from "path";
 import { listSessions } from "maw-js/sdk";
 import { getGhqRoot } from "maw-js/config/ghq-root";
-import { FLEET_DIR } from "maw-js/sdk";
 import { takeSnapshot } from "maw-js/sdk";
 import { tmux } from "maw-js/sdk";
 import { normalizeTarget } from "maw-js/core/matcher/normalize-target";

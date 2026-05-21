@@ -29,10 +29,9 @@
  * non-destructive, with an audit trail (#572 nit 1, follow-up to #579).
  */
 import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, unlinkSync } from "fs";
-import { homedir } from "os";
-import { join, dirname } from "path";
+import { dirname } from "path";
 import { withPeersLock } from "./lock";
-import { mawStatePath } from "../../core/xdg";
+import { legacyMawPath, mawStatePath } from "../../core/xdg";
 
 /**
  * Structured last-probe failure — opt-in field on Peer (#565).
@@ -109,7 +108,7 @@ export function peersPath(): string {
 
 function legacyPeersPath(): string | null {
   if (process.env.PEERS_FILE || process.env.MAW_HOME) return null;
-  const legacy = join(process.env.HOME || homedir(), ".maw", "peers.json");
+  const legacy = legacyMawPath("peers.json");
   return legacy === peersPath() ? null : legacy;
 }
 

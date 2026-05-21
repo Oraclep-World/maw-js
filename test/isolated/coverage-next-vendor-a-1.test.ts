@@ -79,7 +79,14 @@ mock.module("maw-js/config/ghq-root", () => ({
 }));
 
 mock.module("maw-js/commands/shared/fleet-load", () => ({
+  fleetDirForWrite: () => join(tempRoot || tmpdir(), "fleet"),
   loadFleet: () => fleet,
+  loadFleetEntries: () => fleet.map((session, index) => ({
+    file: `${String(index + 1).padStart(2, "0")}-${session.name}.json`,
+    num: index + 1,
+    groupName: session.name,
+    session,
+  })),
 }));
 
 mock.module(join(attachRoot, "resolve-attach-target"), () => ({

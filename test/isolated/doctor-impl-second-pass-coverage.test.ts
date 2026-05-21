@@ -9,6 +9,11 @@ const C = { green: "", red: "", yellow: "", gray: "", reset: "" };
 const HOME = "/tmp/doctor-impl-second-pass-home";
 const BIN = `${HOME}/.bun/bin/maw`;
 const PLUGINS_DIR = `${HOME}/.maw/plugins`;
+const DATA_DIR = `${HOME}/xdg-data`;
+
+function expectedPluginsDir(): string {
+  return process.env.MAW_PLUGINS_DIR || (process.env.MAW_DATA_DIR ? join(process.env.MAW_DATA_DIR, "plugins") : PLUGINS_DIR);
+}
 
 type FsMode =
   | "healthy"
@@ -26,6 +31,8 @@ let spawnCalls: string[][] = [];
 
 const originalLog = console.log;
 const originalSpawn = Bun.spawn;
+const originalDataDir = process.env.MAW_DATA_DIR;
+const originalPluginsDir = process.env.MAW_PLUGINS_DIR;
 
 function fakeProc(code: number, stdout = "", stderr = "") {
   return {
@@ -54,8 +61,9 @@ mock.module("fs", () => ({
     if (path === BIN) return fsMode !== "missing-bin";
     if (path === "/broken/target") return false;
     if (path === "/linked/real/maw") return true;
-    if (path.startsWith(`${PLUGINS_DIR}/`)) {
-      const entry = path.slice(PLUGINS_DIR.length + 1);
+    const pluginsDir = expectedPluginsDir();
+    if (path.startsWith(`${pluginsDir}/`)) {
+      const entry = path.slice(pluginsDir.length + 1);
       if (entry === "broken") return false;
       return true;
     }
@@ -69,7 +77,8 @@ mock.module("fs", () => ({
     throw new Error("not a symlink");
   },
   readdirSync: (dir: string) => {
-    if (dir !== PLUGINS_DIR) throw new Error(`unexpected readdirSync: ${dir}`);
+    const pluginsDir = expectedPluginsDir();
+    if (dir !== pluginsDir) throw new Error(`unexpected readdirSync: ${dir}`);
     if (fsMode === "smoke-read-error") throw new Error("plugins dir unreadable");
     if (fsMode === "smoke-clean") return ["good", "plain"];
     if (fsMode === "smoke-broken") return ["good", "broken", "plain"];
@@ -103,6 +112,8 @@ beforeEach(() => {
   spawnCalls = [];
   fsMode = "healthy";
   bunLinkCheckout = null;
+  delete process.env.MAW_DATA_DIR;
+  delete process.env.MAW_PLUGINS_DIR;
   realFs.rmSync(HOME, { recursive: true, force: true });
   realFs.mkdirSync(PLUGINS_DIR, { recursive: true });
   console.log = (line?: unknown) => {
@@ -123,6 +134,10 @@ beforeEach(() => {
 afterEach(() => {
   console.log = originalLog;
   (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = originalSpawn;
+  if (originalDataDir === undefined) delete process.env.MAW_DATA_DIR;
+  else process.env.MAW_DATA_DIR = originalDataDir;
+  if (originalPluginsDir === undefined) delete process.env.MAW_PLUGINS_DIR;
+  else process.env.MAW_PLUGINS_DIR = originalPluginsDir;
 });
 
 describe("doctor impl second-pass coverage", () => {
@@ -176,6 +191,18 @@ describe("doctor impl second-pass coverage", () => {
       },
     ]);
     expect(execCalls).toEqual([]);
+  });
+
+  test("smoke plugin checks follow MAW_DATA_DIR when plugin dir is not explicitly overridden", async () => {
+    process.env.MAW_DATA_DIR = DATA_DIR;
+    const xdgPluginsDir = join(DATA_DIR, "plugins");
+    realFs.mkdirSync(xdgPluginsDir, { recursive: true });
+    realFs.writeFileSync(join(xdgPluginsDir, "good"), "ok");
+
+    const result = await cmdDoctor(["smoke"]);
+
+    expect(result.checks[5]).toEqual({ name: "smoke:plugins", ok: true, message: "1 plugins loaded (0 broken)" });
+    expect(result.checks[6]).toEqual({ name: "smoke:symlinks", ok: true, message: "no broken symlinks" });
   });
 
   test("smoke suite reports clean plugin symlinks and unreadable plugin directories", async () => {

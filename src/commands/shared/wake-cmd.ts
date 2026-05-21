@@ -7,7 +7,7 @@ import { normalizeTarget } from "../../core/matcher/normalize-target";
 import { assertValidOracleName } from "../../core/fleet/validate";
 import { canonicalSessionName } from "../../core/fleet/session-name";
 import { resolveOracle, findWorktrees, findReusableWorktreeBySlug, getSessionMap, resolveFleetSession, detectSession, setSessionEnv, sanitizeBranchName } from "./wake-resolve";
-import { attachToSession, ensureSessionRunning, createWorktree } from "./wake-session";
+import { attachToSession, ensureSessionRunning, createWorktree, reconcileParentClaudeDir } from "./wake-session";
 import { maybeOpenWindow, maybeSplit } from "./wake-maybe-split";
 import { runWakeLifecycleHooks } from "../../plugin/lifecycle";
 import { parseWakeTarget, ensureCloned } from "./wake-target";
@@ -449,7 +449,30 @@ async function normalizeBringDestinationWindow(source: string, opts: WakeOptions
 
   const matches = await findLiveWindowsByName(destination);
   if (matches.length === 0) return;
-  if (matches.length > 1) throw buildAmbiguousBringDestinationError(source, destination, matches);
+  if (matches.length > 1) {
+    if (opts.pick) {
+      const picked = promptAmbiguousBringPick(
+        destination,
+        matches.map(match => ({
+          name: match.window,
+          target: match.target,
+          detail: `tmux window in ${match.session}`,
+        })),
+      );
+      if (picked) {
+        const [session, ...windowParts] = picked.target.split(":");
+        opts.session = session || picked.target;
+        opts.splitTarget = picked.target;
+        opts.resolvedBringDestinationWindow = {
+          session: session || picked.target,
+          window: windowParts.join(":") || picked.name,
+          target: picked.target,
+        };
+        return;
+      }
+    }
+    throw buildAmbiguousBringDestinationError(source, destination, matches);
+  }
 
   const match = matches[0]!;
   opts.session = match.session;
@@ -892,6 +915,7 @@ export async function cmdWake(oracle: string, opts: WakeOptions): Promise<string
 
     if (match) {
       console.log(`\x1b[33m⚡\x1b[0m reusing worktree: ${match.path}`);
+      await reconcileParentClaudeDir(repoPath, match.path, console.log.bind(console));
       targetPath = match.path;
       windowName = `${oracle}-${name}`;
     } else {

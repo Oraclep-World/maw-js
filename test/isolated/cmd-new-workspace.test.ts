@@ -51,6 +51,7 @@ mock.module(join(import.meta.dir, "../../src/sdk"), () => ({
 }));
 
 mock.module(join(import.meta.dir, "../../src/commands/shared/wake-session"), () => ({
+  reconcileParentClaudeDir: async () => {},
   attachToSession: async (name: string) => { attached.push(name); },
 }));
 
@@ -212,6 +213,8 @@ describe("cmdNew workspace session factory", () => {
         .rejects.toThrow("path does not exist");
       await expect(cmdNew(["file-path", "--path", file, "--no-attach"]))
         .rejects.toThrow("path is not a directory");
+      await expect(cmdNew(["empty-path", "--path", "", "--no-attach"]))
+        .rejects.toThrow("--path requires a non-empty directory");
       await expect(cmdNew(["empty-cmd", "--cmd", "", "--no-attach"]))
         .rejects.toThrow("--cmd cannot be empty");
 
@@ -281,6 +284,32 @@ describe("cmdNew workspace session factory", () => {
         reused: false,
       });
       expect(attached).toEqual([]);
+    } finally {
+      logSpy.mockRestore();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("--split logs command mode for human output", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "maw-new-"));
+    const lines: string[] = [];
+    const logSpy = spyOn(console, "log").mockImplementation((line: string) => {
+      lines.push(String(line));
+    });
+    try {
+      await cmdNew(["agent-log", "-p", dir, "-c", "bun dev", "--split", "--no-attach"]);
+
+      expect(splitWindowCalls).toEqual([
+        {
+          target: undefined,
+          opts: {
+            cwd: dir,
+            command: `bun dev; exec ${process.env.SHELL || "zsh"}`,
+            printFormat: "#{pane_id}",
+          },
+        },
+      ]);
+      expect(lines.join("\n")).toContain("created split shell + command 'agent-log' in work:main");
     } finally {
       logSpy.mockRestore();
       rmSync(dir, { recursive: true, force: true });

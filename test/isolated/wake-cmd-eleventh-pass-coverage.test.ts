@@ -161,6 +161,7 @@ mock.module(import.meta.resolve("../../src/commands/shared/wake-resolve"), () =>
 
 mock.module(import.meta.resolve("../../src/commands/shared/wake-session"), () => ({
   attachToSession: async (session: string) => { attachCalls.push(session); },
+  reconcileParentClaudeDir: async () => {},
   ensureSessionRunning: async () => ensureSessionRunningReturn,
   createWorktree: async (...args: any[]) => {
     worktreeCreates.push(args);

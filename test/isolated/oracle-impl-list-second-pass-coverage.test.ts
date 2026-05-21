@@ -35,8 +35,13 @@ let invalidateCalls = 0;
 let logs: string[] = [];
 
 const sdkPath = import.meta.resolve("../../src/sdk");
+const fleetLoadPath = import.meta.resolve("../../src/commands/shared/fleet-load");
 const manifestPath = import.meta.resolve("../../src/lib/oracle-manifest");
 const nicknamesPath = import.meta.resolve("../../src/core/fleet/nicknames");
+
+mock.module(fleetLoadPath, () => ({
+  loadFleetEntries: () => [],
+}));
 
 mock.module(sdkPath, () => ({
   FLEET_DIR: "/tmp/maw-oracle-list-second-pass-fleet",

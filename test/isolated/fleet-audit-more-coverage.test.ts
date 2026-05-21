@@ -14,7 +14,7 @@ process.env.MAW_CONFIG_DIR = mawConfigDir;
 process.env.MAW_STATE_DIR = mawStateDir;
 process.env.USER = "coverage-user";
 
-const { logAudit, logAnomaly, readAudit } = await import("../../src/core/fleet/audit.ts?coverage");
+const { auditFilePath, logAudit, logAnomaly, readAudit } = await import("../../src/core/fleet/audit.ts?coverage");
 const auditFile = join(mawStateDir, "audit.jsonl");
 
 afterAll(() => {
@@ -57,5 +57,25 @@ describe("fleet audit helpers", () => {
     });
     expect(typeof entry.cwd).toBe("string");
     expect(entry.tty === null || typeof entry.tty === "string").toBe(true);
+  });
+
+  test("audit helpers resolve the state audit path at operation time", () => {
+    const dynamicState = mkdtempSync(join(tmpdir(), "maw-audit-dynamic-state-"));
+    process.env.MAW_STATE_DIR = dynamicState;
+    try {
+      const dynamicAuditFile = join(dynamicState, "audit.jsonl");
+
+      expect(auditFilePath()).toBe(dynamicAuditFile);
+      expect(readAudit()).toEqual([]);
+
+      logAudit("doctor", ["xdg"], "ok");
+
+      expect(existsSync(dynamicAuditFile)).toBe(true);
+      const entry = JSON.parse(readFileSync(dynamicAuditFile, "utf8").trim());
+      expect(entry).toMatchObject({ cmd: "doctor", args: ["xdg"], result: "ok" });
+    } finally {
+      process.env.MAW_STATE_DIR = mawStateDir;
+      rmSync(dynamicState, { recursive: true, force: true });
+    }
   });
 });

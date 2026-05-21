@@ -79,6 +79,7 @@ mock.module("maw-js/config/ghq-root", () => ({
 }));
 
 mock.module("maw-js/commands/shared/fleet-load", () => ({
+  fleetDirForWrite: () => fleetDir,
   loadFleetEntries: () => fleetEntries,
 }));
 
@@ -119,10 +120,11 @@ function writeFleetFile(file: string) {
 function fleetEntry(
   name: string,
   file: string,
-  opts: { repo?: string; syncPeers?: string[]; windows?: Array<Record<string, unknown>> } = {},
+  opts: { repo?: string; syncPeers?: string[]; windows?: Array<Record<string, unknown>>; path?: string } = {},
 ) {
   return {
     file,
+    ...(opts.path ? { path: opts.path } : {}),
     session: {
       name,
       windows: opts.windows ?? [{ repo: opts.repo }],
@@ -325,6 +327,23 @@ describe("archive impl coverage", () => {
     expect(existsSync(join(fleetDir, `${file}.disabled`))).toBe(true);
     expect(out).toContain("no sync_peers configured — knowledge stays local");
     expect(out).toContain("solo archived — ψ/ preserved locally, knowledge synced to peers");
+  });
+
+  test("non-dry archive disables the loaded source-path fleet config", async () => {
+    const stateFleetDir = join(tmpRoot, "state-fleet-archive");
+    rmSync(stateFleetDir, { recursive: true, force: true });
+    mkdirSync(stateFleetDir, { recursive: true });
+    const file = "070-stateful.json";
+    const sourcePath = join(stateFleetDir, file);
+    fleetEntries = [fleetEntry("070-stateful", file, { repo: "owner/stateful", path: sourcePath })];
+    writeFileSync(sourcePath, JSON.stringify({ session: "state" }), "utf-8");
+
+    await cmdArchive("stateful");
+
+    expect(existsSync(sourcePath)).toBe(false);
+    expect(existsSync(`${sourcePath}.disabled`)).toBe(true);
+    expect(existsSync(join(fleetDir, `${file}.disabled`))).toBe(false);
+    expect(hostExecCalls).toEqual(["gh repo archive owner/stateful --yes"]);
   });
 
   test("non-dry archive reports soul-sync, fleet rename, and GitHub archive failures without throwing", async () => {

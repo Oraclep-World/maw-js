@@ -28,6 +28,9 @@ const real = {
   stdinIsTTY: Object.getOwnPropertyDescriptor(process.stdin, "isTTY"),
   testMode: process.env.MAW_TEST_MODE,
   home: process.env.HOME,
+  mawHome: process.env.MAW_HOME,
+  mawDataDir: process.env.MAW_DATA_DIR,
+  mawXdg: process.env.MAW_XDG,
   execSync: _child.execSync,
   renameSync: _fs.renameSync,
   homedir: _os.homedir,
@@ -93,6 +96,9 @@ async function captureRun(args: string[], opts: { testMode?: string | null; stdi
   let code: number | undefined;
 
   process.env.HOME = homeDir;
+  delete process.env.MAW_HOME;
+  delete process.env.MAW_DATA_DIR;
+  delete process.env.MAW_XDG;
   if (opts.testMode === null) delete process.env.MAW_TEST_MODE;
   else process.env.MAW_TEST_MODE = opts.testMode ?? "1";
   if (opts.stdinIsTTY !== undefined) setStdinIsTTY(opts.stdinIsTTY);
@@ -207,6 +213,12 @@ afterEach(() => {
   else process.env.MAW_TEST_MODE = real.testMode;
   if (real.home === undefined) delete process.env.HOME;
   else process.env.HOME = real.home;
+  if (real.mawHome === undefined) delete process.env.MAW_HOME;
+  else process.env.MAW_HOME = real.mawHome;
+  if (real.mawDataDir === undefined) delete process.env.MAW_DATA_DIR;
+  else process.env.MAW_DATA_DIR = real.mawDataDir;
+  if (real.mawXdg === undefined) delete process.env.MAW_XDG;
+  else process.env.MAW_XDG = real.mawXdg;
   if (tempRoot && _fs.existsSync(tempRoot)) _fs.rmSync(tempRoot, { recursive: true, force: true });
 });
 
@@ -319,7 +331,7 @@ describe("cmd-update seventh-pass focused branch coverage", () => {
     expect(res.stderr).toContain("failed to restore stash: rollback bin restore blocked");
   });
 
-  test("successful install links a matching local SDK clone and creates ~/.oracle package metadata", async () => {
+  test("successful install links a matching local SDK clone and creates XDG package metadata", async () => {
     prepareInstallHome();
     prepareClone("26.5.16-alpha.1053");
     ghqFindReturn = cloneDir;
@@ -333,8 +345,8 @@ describe("cmd-update seventh-pass focused branch coverage", () => {
       ["bun", "add", "-g", "github:Soul-Brews-Studio/maw-js#v26.5.16-alpha.1053"],
     ]);
     expect(execSyncCalls).toContain(`cd ${cloneDir} && bun link`);
-    expect(execSyncCalls).toContain(`cd ${join(homeDir, ".oracle")} && bun link maw`);
-    expect(_fs.readFileSync(join(homeDir, ".oracle", "package.json"), "utf-8")).toContain("oracle-plugins");
+    expect(execSyncCalls).toContain(`cd ${join(homeDir, ".maw", "oracle-plugins")} && bun link maw`);
+    expect(_fs.readFileSync(join(homeDir, ".maw", "oracle-plugins", "package.json"), "utf-8")).toContain("oracle-plugins");
     expect(res.stdout).toContain("SDK linked (@maw/sdk)");
   });
 });

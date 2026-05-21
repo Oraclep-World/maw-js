@@ -1,17 +1,17 @@
 /**
  * Fleet-entry registration for `maw bud --from-repo` (#588).
  *
- * Only module that touches FLEET_DIR for the from-repo flow. Tests can
+ * Only module that writes fleet entries for the from-repo flow. Tests can
  * `mock.module("./from-repo-fleet", …)` to assert wiring without
- * writing to ~/.config/maw/fleet/.
+ * writing to the user fleet.
  *
  * Design: docs/bud/from-repo-impl.md section (h).
  */
 
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "fs";
+import { mkdirSync, readFileSync, writeFileSync } from "fs";
 import { basename, join } from "path";
 import { execFileSync } from "child_process";
-import { FLEET_DIR } from "maw-js/core/paths";
+import { fleetDirForWrite, loadFleetEntries, type FleetEntry } from "maw-js/commands/shared/fleet-load";
 
 /** Parsed `org/repo` slug from a remote URL. */
 export interface RepoSlug {
@@ -60,25 +60,19 @@ export function resolveSlug(target: string): RepoSlug {
   return { org: "<unknown>", repo: basename(target) };
 }
 
-/** Find the next NN prefix by scanning existing fleet entries. */
-function nextFleetNum(): number {
-  if (!existsSync(FLEET_DIR)) return 1;
-  let max = 0;
-  for (const f of readdirSync(FLEET_DIR)) {
-    if (!f.endsWith(".json") || f.endsWith(".disabled")) continue;
-    const m = f.match(/^(\d+)-/);
-    if (m) max = Math.max(max, parseInt(m[1], 10));
-  }
-  return max + 1;
+/** Absolute source path for an entry, falling back to the current write dir. */
+function fleetEntryPath(entry: Pick<FleetEntry, "file" | "path">): string {
+  return entry.path ?? join(fleetDirForWrite(), entry.file);
+}
+
+/** Find the next NN prefix by scanning existing fleet entries across read roots. */
+function nextFleetNum(entries: FleetEntry[] = loadFleetEntries()): number {
+  return entries.reduce((max, entry) => Math.max(max, entry.num), 0) + 1;
 }
 
 /** Find an existing fleet file for this stem (matches `NN-<stem>.json`). */
-function findExistingForStem(stem: string): string | null {
-  if (!existsSync(FLEET_DIR)) return null;
-  for (const f of readdirSync(FLEET_DIR)) {
-    if (f.endsWith(`-${stem}.json`)) return f;
-  }
-  return null;
+function findExistingForStem(stem: string, entries: FleetEntry[] = loadFleetEntries()): FleetEntry | null {
+  return entries.find((entry) => entry.file.endsWith(`-${stem}.json`)) ?? null;
 }
 
 export interface RegisterFleetOpts {
@@ -102,9 +96,10 @@ export interface RegisterFleetResult {
  */
 export function registerFleetEntry(opts: RegisterFleetOpts): RegisterFleetResult {
   const slug = resolveSlug(opts.target);
-  const existing = findExistingForStem(opts.stem);
+  const entries = loadFleetEntries();
+  const existing = findExistingForStem(opts.stem, entries);
   if (existing) {
-    const path = join(FLEET_DIR, existing);
+    const path = fleetEntryPath(existing);
     const cfg = JSON.parse(readFileSync(path, "utf-8"));
     let updated = false;
     if (opts.parent && !cfg.budded_from) {
@@ -115,9 +110,11 @@ export function registerFleetEntry(opts: RegisterFleetOpts): RegisterFleetResult
     if (updated) writeFileSync(path, JSON.stringify(cfg, null, 2) + "\n");
     return { file: path, created: false, slug };
   }
-  const num = nextFleetNum();
+  const num = nextFleetNum(entries);
   const padded = String(num).padStart(2, "0");
-  const file = join(FLEET_DIR, `${padded}-${opts.stem}.json`);
+  const writeDir = fleetDirForWrite();
+  mkdirSync(writeDir, { recursive: true });
+  const file = join(writeDir, `${padded}-${opts.stem}.json`);
   const cfg: Record<string, unknown> = {
     name: `${padded}-${opts.stem}`,
     windows: [{ name: `${opts.stem}-oracle`, repo: `${slug.org}/${slug.repo}` }],

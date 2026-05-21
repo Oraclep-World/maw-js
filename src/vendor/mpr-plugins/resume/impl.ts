@@ -3,8 +3,8 @@
  * to the parked window, and remove the file.
  *
  * Pairs with the `park` plugin which now lives at
- * Soul-Brews-Studio/maw-park. Snapshot file format and PARKED_DIR
- * location are kept identical for forward/backward compatibility.
+ * Soul-Brews-Studio/maw-park. Snapshot file format is kept identical,
+ * and legacy config-path snapshots remain readable for migration.
  *
  * cmdResume + a fallback cmdParkLs were inlined here as part of Path A.4
  * extraction (#640). Previously they lived in plugins/park/impl.ts and
@@ -13,11 +13,40 @@
  */
 import { mkdirSync, readFileSync, readdirSync, unlinkSync } from "fs";
 import { join } from "path";
-import { homedir } from "os";
 
 import { tmux } from "maw-js/sdk";
+import { mawConfigPath, mawStatePath } from "../../../core/xdg";
 
-const PARKED_DIR = join(homedir(), ".config/maw/parked");
+function parkedDir(): string {
+  return mawStatePath("parked");
+}
+
+function legacyParkedDir(): string {
+  return mawConfigPath("parked");
+}
+
+function candidateParkedDirs(): string[] {
+  const dirs = [parkedDir()];
+  const legacy = legacyParkedDir();
+  if (legacy !== dirs[0]) dirs.push(legacy);
+  return dirs;
+}
+
+function parkedSnapshots(): Map<string, string> {
+  const snapshots = new Map<string, string>();
+  for (const dir of candidateParkedDirs()) {
+    let files: string[];
+    try {
+      files = readdirSync(dir).filter(f => f.endsWith(".json"));
+    } catch {
+      continue;
+    }
+    for (const file of files) {
+      if (!snapshots.has(file)) snapshots.set(file, join(dir, file));
+    }
+  }
+  return snapshots;
+}
 
 interface ParkedState {
   window: string;
@@ -41,13 +70,13 @@ function timeAgo(iso: string): string {
 
 /** Fallback list of parked snapshots, used when resume can't locate target. */
 function listParked(): void {
-  mkdirSync(PARKED_DIR, { recursive: true });
-  const files = readdirSync(PARKED_DIR).filter(f => f.endsWith(".json"));
+  mkdirSync(parkedDir(), { recursive: true });
+  const files = [...parkedSnapshots().values()];
   if (!files.length) { console.log("\x1b[90mno parked tabs\x1b[0m"); return; }
 
   console.log(`\n\x1b[36mPARKED\x1b[0m (${files.length}):\n`);
-  for (const f of files) {
-    const s: ParkedState = JSON.parse(readFileSync(join(PARKED_DIR, f), "utf-8"));
+  for (const path of files) {
+    const s: ParkedState = JSON.parse(readFileSync(path, "utf-8"));
     const ago = timeAgo(s.parkedAt);
     const dirty = s.dirtyFiles.length > 0 ? `\x1b[33m${s.dirtyFiles.length} dirty\x1b[0m` : "\x1b[32mclean\x1b[0m";
     const note = s.note ? `"${s.note}"` : "\x1b[90m(no note)\x1b[0m";
@@ -57,11 +86,12 @@ function listParked(): void {
 }
 
 export async function cmdResume(target?: string): Promise<void> {
-  mkdirSync(PARKED_DIR, { recursive: true });
+  mkdirSync(parkedDir(), { recursive: true });
   if (!target) { return listParked(); }
 
   // Find by tab number or window name
-  const files = readdirSync(PARKED_DIR).filter(f => f.endsWith(".json"));
+  const snapshots = parkedSnapshots();
+  const files = [...snapshots.keys()];
   const num = parseInt(target);
   let filePath: string | null = null;
   let state: ParkedState | null = null;
@@ -74,8 +104,11 @@ export async function cmdResume(target?: string): Promise<void> {
     if (win) {
       const f = `${win.name}.json`;
       if (files.includes(f)) {
-        filePath = join(PARKED_DIR, f);
-        state = JSON.parse(readFileSync(filePath, "utf-8"));
+        const path = snapshots.get(f);
+        if (path) {
+          filePath = path;
+          state = JSON.parse(readFileSync(path, "utf-8"));
+        }
       }
     }
   } else {
@@ -83,8 +116,11 @@ export async function cmdResume(target?: string): Promise<void> {
     const match = files.find(f => f === `${target}.json`) ||
                   files.find(f => f.toLowerCase().includes(target.toLowerCase()));
     if (match) {
-      filePath = join(PARKED_DIR, match);
-      state = JSON.parse(readFileSync(filePath, "utf-8"));
+      const path = snapshots.get(match);
+      if (path) {
+        filePath = path;
+        state = JSON.parse(readFileSync(path, "utf-8"));
+      }
     }
   }
 

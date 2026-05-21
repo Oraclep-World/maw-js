@@ -19,7 +19,10 @@ import { listSessions } from "../../../sdk";
 import { runStaleScan, type StaleEntry } from "./impl-stale";
 import type { OracleEntry } from "../../../sdk";
 import { createInterface } from "readline";
-import { CACHE_FILE, LEGACY_CACHE_FILE } from "../../../core/fleet/registry-oracle-types";
+import {
+  registryCacheFilePath,
+  legacyRegistryCacheFilePath,
+} from "../../../core/fleet/registry-oracle-types";
 
 
 export interface PruneOpts {
@@ -104,8 +107,9 @@ export function buildStaleCandidates(staleEntries: StaleEntry[]): PruneCandidate
 export function readRawRegistry(file: string): Record<string, unknown> {
   try {
     if (existsSync(file)) return JSON.parse(readFileSync(file, "utf-8"));
-    if (file === CACHE_FILE && existsSync(LEGACY_CACHE_FILE)) {
-      return JSON.parse(readFileSync(LEGACY_CACHE_FILE, "utf-8"));
+    if (file === registryCacheFilePath()) {
+      const legacyFile = legacyRegistryCacheFilePath();
+      if (existsSync(legacyFile)) return JSON.parse(readFileSync(legacyFile, "utf-8"));
     }
   } catch { /* fall through */ }
   return {};
@@ -135,7 +139,8 @@ export async function runPrune(
   opts: PruneOpts = {},
   deps: PruneDeps = {},
 ): Promise<PruneCandidate[]> {
-  const readRawCache = deps.readRawCache ?? (() => readRawRegistry(CACHE_FILE));
+  const registryFile = registryCacheFilePath();
+  const readRawCache = deps.readRawCache ?? (() => readRawRegistry(registryFile));
 
   const rawCache = readRawCache();
   const entries: OracleEntry[] = (rawCache.oracles as OracleEntry[] | undefined) ?? [];
@@ -163,8 +168,9 @@ export async function cmdOraclePrune(
   opts: PruneOpts = {},
   deps: PruneDeps = {},
 ): Promise<void> {
-  const readRawCache = deps.readRawCache ?? (() => readRawRegistry(CACHE_FILE));
-  const writeRawCache = deps.writeRawCache ?? ((data) => writeRawRegistry(CACHE_FILE, data));
+  const registryFile = registryCacheFilePath();
+  const readRawCache = deps.readRawCache ?? (() => readRawRegistry(registryFile));
+  const writeRawCache = deps.writeRawCache ?? ((data) => writeRawRegistry(registryFile, data));
 
   const candidates = await runPrune(opts, deps);
 

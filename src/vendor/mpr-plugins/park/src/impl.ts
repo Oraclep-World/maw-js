@@ -3,9 +3,9 @@
  *
  * Park (pause) a tmux window — capture its current git context (branch,
  * last commit, dirty files) and an optional human-readable note, write
- * the snapshot to ~/.config/maw/parked/<window>.json. Resume via the
- * separate `maw resume` plugin (which reads the snapshot, sends a
- * recap-style prompt to the parked window, and removes the file).
+ * the snapshot to the maw state dir under parked/<window>.json. Resume
+ * via the separate `maw resume` plugin (which reads the snapshot, sends
+ * a recap-style prompt to the parked window, and removes the file).
  *
  * Tmux + git invoked via direct spawnSync (bg-pattern) — see
  * ./internal/tmux.ts and ./internal/git.ts. Public @maw-js/sdk doesn't
@@ -13,12 +13,27 @@
  */
 import { mkdirSync, writeFileSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
 
 import { tmuxRun, tmuxListWindows } from "./internal/tmux";
 import { gitBranch, gitLastCommit, gitDirtyFiles } from "./internal/git";
+import { mawConfigPath, mawStatePath } from "../../../../core/xdg";
 
-export const PARKED_DIR = join(homedir(), ".config/maw/parked");
+export function parkedDir(): string {
+  return mawStatePath("parked");
+}
+
+function legacyParkedDir(): string {
+  return mawConfigPath("parked");
+}
+
+function candidateParkedDirs(): string[] {
+  const dirs = [parkedDir()];
+  const legacy = legacyParkedDir();
+  if (legacy !== dirs[0]) dirs.push(legacy);
+  return dirs;
+}
+
+export const PARKED_DIR = parkedDir();
 
 export interface ParkedState {
   window: string;
@@ -106,22 +121,36 @@ export async function cmdPark(...rawArgs: string[]): Promise<void> {
     parkedAt: new Date().toISOString(),
   };
 
-  mkdirSync(PARKED_DIR, { recursive: true });
-  writeFileSync(join(PARKED_DIR, `${targetWindow}.json`), JSON.stringify(state, null, 2) + "\n");
+  const dir = parkedDir();
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `${targetWindow}.json`), JSON.stringify(state, null, 2) + "\n");
   console.log(`\x1b[32m✓\x1b[0m parked \x1b[33m${targetWindow}\x1b[0m${note ? ` — "${note}"` : ""}`);
 }
 
 export async function cmdParkLs(): Promise<void> {
-  mkdirSync(PARKED_DIR, { recursive: true });
-  const files = readdirSync(PARKED_DIR).filter((f) => f.endsWith(".json"));
+  const primary = parkedDir();
+  mkdirSync(primary, { recursive: true });
+  const snapshots = new Map<string, { dir: string; file: string }>();
+  for (const dir of candidateParkedDirs()) {
+    let files: string[];
+    try {
+      files = readdirSync(dir).filter((f) => f.endsWith(".json"));
+    } catch {
+      continue;
+    }
+    for (const file of files) {
+      if (!snapshots.has(file)) snapshots.set(file, { dir, file });
+    }
+  }
+  const files = [...snapshots.values()];
   if (!files.length) {
     console.log("\x1b[90mno parked tabs\x1b[0m");
     return;
   }
 
   console.log(`\n\x1b[36mPARKED\x1b[0m (${files.length}):\n`);
-  for (const f of files) {
-    const s: ParkedState = JSON.parse(readFileSync(join(PARKED_DIR, f), "utf-8"));
+  for (const { dir, file } of files) {
+    const s: ParkedState = JSON.parse(readFileSync(join(dir, file), "utf-8"));
     const ago = timeAgo(s.parkedAt);
     const dirty = s.dirtyFiles.length > 0 ? `\x1b[33m${s.dirtyFiles.length} dirty\x1b[0m` : "\x1b[32mclean\x1b[0m";
     const note = s.note ? `"${s.note}"` : "\x1b[90m(no note)\x1b[0m";

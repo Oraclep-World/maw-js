@@ -136,8 +136,7 @@ export async function startServer(port = +(process.env.MAW_PORT || loadConfig().
   // Plugin system — built-in + user plugins
   try {
     const { PluginSystem, loadPlugins, reloadUserPlugins, watchUserPlugins, registerManifestHooks } = require("../plugins/index");
-    const { homedir } = require("os");
-    const { join, resolve, dirname } = require("path");
+    const { resolve, dirname } = require("path");
     const plugins = new PluginSystem({
       shouldSkipHandler: (eventName: string, pluginName: string | undefined) =>
         hasEnginePluginEventSink(pluginName, eventName),
@@ -147,8 +146,8 @@ export async function startServer(port = +(process.env.MAW_PORT || loadConfig().
     const builtinDir = resolve(dirname(new URL(import.meta.url).pathname), "plugins", "builtin");
     await loadPlugins(plugins, builtinDir, "builtin");
 
-    // User plugins (file-drop: ~/.oracle/plugins/)
-    const userPluginsDir = join(homedir(), ".oracle", "plugins");
+    // User plugins (file-drop: XDG data plugin dir; overridable for tests/dev)
+    const userPluginsDir = process.env.MAW_PLUGINS_DIR || mawDataPath("plugins");
     await loadPlugins(plugins, userPluginsDir, "user");
 
     // Package plugin hooks (manifest.hooks) — lets bundled/MPR plugins

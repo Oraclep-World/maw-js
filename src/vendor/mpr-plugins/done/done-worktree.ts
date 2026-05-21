@@ -1,7 +1,23 @@
 import { hostExec } from "maw-js/sdk";
-import { FLEET_DIR } from "maw-js/sdk";
 import { readdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
+import { fleetDirsForRead } from "maw-js/commands/shared/fleet-load";
+
+function activeFleetConfigFiles(): Array<{ file: string; path: string }> {
+  const filesByName = new Map<string, { file: string; path: string }>();
+  for (const fleetDir of fleetDirsForRead()) {
+    let files: string[];
+    try {
+      files = readdirSync(fleetDir).filter(f => f.endsWith(".json")).sort();
+    } catch {
+      continue;
+    }
+    for (const file of files) {
+      if (!filesByName.has(file)) filesByName.set(file, { file, path: join(fleetDir, file) });
+    }
+  }
+  return [...filesByName.values()].sort((a, b) => a.file.localeCompare(b.file));
+}
 
 /**
  * Remove a git worktree via fleet config lookup.
@@ -12,8 +28,11 @@ export async function removeWorktreeViaConfig(
   reposRoot: string,
 ): Promise<boolean> {
   try {
-    for (const file of readdirSync(FLEET_DIR).filter(f => f.endsWith(".json"))) {
-      const config = JSON.parse(readFileSync(join(FLEET_DIR, file), "utf-8"));
+    for (const { file, path } of activeFleetConfigFiles()) {
+      let config: any;
+      try {
+        config = JSON.parse(readFileSync(path, "utf-8"));
+      } catch { continue; }
       const win = (config.windows || []).find((w: any) => w.name.toLowerCase() === windowNameLower);
       if (!win?.repo) continue;
 
@@ -95,8 +114,7 @@ export async function removeWorktreeByGhqScan(
 export function removeFromFleetConfig(windowNameLower: string): boolean {
   let removed = false;
   try {
-    for (const file of readdirSync(FLEET_DIR).filter(f => f.endsWith(".json"))) {
-      const filePath = join(FLEET_DIR, file);
+    for (const { file, path: filePath } of activeFleetConfigFiles()) {
       const config = JSON.parse(readFileSync(filePath, "utf-8"));
       const before = config.windows?.length || 0;
       config.windows = (config.windows || []).filter((w: any) => w.name.toLowerCase() !== windowNameLower);

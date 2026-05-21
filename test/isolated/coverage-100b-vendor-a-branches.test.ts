@@ -85,6 +85,7 @@ mock.module("maw-js/commands/shared/wake-target", () => ({
   ensureCloned: async (slug: string) => { hostExecCalls.push(`ensureCloned:${slug}`); },
 }));
 mock.module("maw-js/commands/shared/fleet-load", () => ({
+  fleetDirForWrite: () => join(tmpRoot || tmpdir(), "fleet"),
   loadFleetEntries: () => fleetEntries,
   loadFleet: () => [],
 }));

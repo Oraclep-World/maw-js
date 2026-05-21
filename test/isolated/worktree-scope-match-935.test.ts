@@ -58,6 +58,10 @@ mock.module(join(root, "core/paths"), () => ({
   FLEET_DIR: "/tmp/maw-test-nonexistent-fleet-935",
 }));
 
+mock.module(join(root, "core/xdg"), () => ({
+  mawStatePath: () => "/tmp/maw-test-nonexistent-state-fleet-935",
+}));
+
 const { scanWorktrees } = await import(join(root, "core/fleet/worktrees-scan"));
 
 // Helpers

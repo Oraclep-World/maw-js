@@ -45,6 +45,7 @@ mock.module("maw-js/core/ghq", () => ({
 }));
 
 mock.module("maw-js/commands/shared/fleet-load", () => ({
+  fleetDirForWrite: () => fleetDir,
   loadFleetEntries: () => fleetEntries,
   loadFleet: () => fleetEntries.map(entry => entry.session),
 }));
@@ -101,11 +102,12 @@ function writeLearning(slug: string, name: string, body = "lesson") {
 function fleetEntry(
   name: string,
   file: string,
-  opts: { repo?: string; groupName?: string; syncPeers?: string[]; windows?: Array<Record<string, unknown>> } = {},
+  opts: { repo?: string; groupName?: string; syncPeers?: string[]; windows?: Array<Record<string, unknown>>; path?: string } = {},
 ) {
   const groupName = opts.groupName ?? file.replace(/^\d+-/, "").replace(/\.json$/, "");
   return {
     file,
+    ...(opts.path ? { path: opts.path } : {}),
     num: parseInt(file, 10) || 0,
     groupName,
     session: {
@@ -267,6 +269,31 @@ describe("absorb impl", () => {
     expect(hostExecCalls).toEqual(["gh repo archive owner/donor-oracle --yes"]);
     expect(out).toContain("psi memory sync complete: nothing new");
     expect(out).toContain("not inside tmux; run manually: tmux switch-client -t '042-receiver'");
+  });
+
+  test("reports donor archived when the fleet file came from a source path", async () => {
+    const stateFleetDir = join(tmpRoot, "state-fleet-absorb");
+    rmSync(stateFleetDir, { recursive: true, force: true });
+    mkdirSync(stateFleetDir, { recursive: true });
+    const donorFile = "043-donor.json";
+    const receiverFile = "044-receiver.json";
+    const donorPath = join(stateFleetDir, donorFile);
+    fleetEntries = [
+      fleetEntry("043-donor", donorFile, { repo: "owner/donor-oracle", path: donorPath }),
+      fleetEntry("044-receiver", receiverFile, { repo: "owner/receiver-oracle" }),
+    ];
+    writeFileSync(donorPath, JSON.stringify({ session: "state" }), "utf-8");
+    writeFleetFile(receiverFile);
+    prepareRepo("owner/donor-oracle");
+    prepareRepo("owner/receiver-oracle");
+
+    await cmdAbsorb("donor", "receiver");
+
+    const out = stripAnsi(output());
+    expect(existsSync(donorPath)).toBe(false);
+    expect(existsSync(`${donorPath}.disabled`)).toBe(true);
+    expect(existsSync(join(fleetDir, `${donorFile}.disabled`))).toBe(false);
+    expect(out).toContain("donor absorbed into receiver; donor archived");
   });
 
   test("keeps absorb successful when only the final tmux switch fails", async () => {

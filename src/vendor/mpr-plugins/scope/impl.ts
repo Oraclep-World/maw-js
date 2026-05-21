@@ -21,7 +21,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "fs";
 import { join } from "path";
-import { homedir } from "os";
+import { mawConfigDir } from "../../../core/xdg";
 import type { TScope } from "maw-js/lib/schemas";
 
 // Scope name validation — same alphabet as peers aliases. Slug-safe so the
@@ -40,22 +40,20 @@ export function validateScopeName(name: string): string | null {
 /**
  * Resolve the active config dir at call time (not import time) so tests can
  * point the directory at a temp path per-test by setting MAW_CONFIG_DIR /
- * MAW_HOME in beforeEach. Mirrors the precedence logic in src/core/paths.ts
- * — but as a function instead of a module-level const, so successive calls
- * see env mutations made between them.
+ * MAW_HOME in beforeEach. Delegates to the shared XDG resolver, but as a
+ * function instead of a module-level const, so successive calls see env
+ * mutations made between them.
  *
  *   1. MAW_HOME → <MAW_HOME>/config (instance mode, see #566)
  *   2. MAW_CONFIG_DIR override (legacy)
- *   3. Default singleton ~/.config/maw/
+ *   3. XDG_CONFIG_HOME/maw or default singleton ~/.config/maw/
  *
  * In production the env doesn't change between CLI startup and command
  * dispatch, so the live read returns the same path the cached CONFIG_DIR
  * would have. In tests, the live read is what makes per-test isolation work.
  */
 function activeConfigDir(): string {
-  if (process.env.MAW_HOME) return join(process.env.MAW_HOME, "config");
-  if (process.env.MAW_CONFIG_DIR) return process.env.MAW_CONFIG_DIR;
-  return join(homedir(), ".config", "maw");
+  return mawConfigDir();
 }
 
 export function scopesDir(): string {

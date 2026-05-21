@@ -2,10 +2,10 @@ import { hostExec } from "maw-js/sdk";
 import { tmux } from "maw-js/sdk";
 import { appendFileSync, mkdirSync } from "fs";
 import { join } from "path";
-import { homedir } from "os";
 import { cmdReunion } from "./internal/reunion-impl";
 import { cmdSoulSync } from "./internal/soul-sync-impl";
 import type { DoneOpts } from "./impl";
+import { mawDataPath } from "../../../core/xdg";
 
 type SessionInfo = { name: string; windows: { index: number; name: string; active: boolean }[] };
 
@@ -19,7 +19,7 @@ export async function signalParentInbox(
   const parentWindow = sessions.find(s => s.name === sessionName)?.windows[0]?.name;
   if (!parentWindow) return;
   const parentTarget = parentWindow.replace(/[^a-zA-Z0-9_-]/g, "");
-  const inboxDir = join(homedir(), ".oracle", "inbox");
+  const inboxDir = mawDataPath("inbox");
   const signal =
     JSON.stringify({ ts: new Date().toISOString(), from, type: "done", msg: `worktree ${windowName} completed`, thread: null }) + "\n";
   try {

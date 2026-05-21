@@ -10,7 +10,7 @@ const ghqRoot = mkdtempSync(join(tmpdir(), "maw-bud-wake-ghq-"));
 let hostExecCalls: string[] = [];
 let soulSyncCalls: Array<{ parent: string; opts: Record<string, unknown> }> = [];
 let wakeCalls: Array<{ name: string; opts: Record<string, unknown> }> = [];
-let fleetEntries: Array<{ session: { name: string }; file: string }> = [];
+let fleetEntries: Array<{ session: { name: string }; file: string; path?: string }> = [];
 let issuePromptCalls: Array<{ issue: number; repo: string }> = [];
 let ensureClonedCalls: string[] = [];
 let splitCalls: string[] = [];
@@ -38,6 +38,7 @@ mock.module("maw-js/config/ghq-root", () => ({
 }));
 
 mock.module("maw-js/commands/shared/fleet-load", () => ({
+  fleetDirForWrite: () => fleetDir,
   loadFleetEntries: () => fleetEntries,
 }));
 
@@ -271,6 +272,21 @@ describe("bud wake finalization", () => {
     expect(rendered).toContain("initial commit pushed");
     expect(rendered).toContain("added sprout to parent's sync_peers");
     expect(rendered).toContain("copied local project ψ/ from owner/project");
+  });
+
+  test("updates parent sync_peers at the loaded source path", async () => {
+    const stateFleetDir = join(tempRoot, "state-fleet");
+    mkdirSync(stateFleetDir, { recursive: true });
+    const parentFleetFile = join(stateFleetDir, "01-parent.json");
+    const legacyParentFile = join(fleetDir, "01-parent.json");
+    writeFileSync(parentFleetFile, JSON.stringify({ sync_peers: [] }));
+    fleetEntries = [{ session: { name: "01-parent" }, file: "01-parent.json", path: parentFleetFile }];
+
+    await finalizeBud(finalizeCtx({ opts: {} }));
+
+    expect(JSON.parse(readFileSync(parentFleetFile, "utf-8")).sync_peers).toEqual(["sprout"]);
+    expect(existsSync(legacyParentFile)).toBe(false);
+    expect(logs.join("\n")).toContain("added sprout to parent's sync_peers");
   });
 
   test("logs recoverable failures, root/no-tmux paths, and wake policy skips", async () => {

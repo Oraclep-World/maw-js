@@ -151,6 +151,9 @@ describe("tile plugin index coverage", () => {
     result = await tileHandler({ source: "cli", args: ["2", "--wt"] } as any);
     expect(result).toEqual({ ok: true, output: "tile 2" });
 
+    result = await tileHandler({ source: "cli", args: ["4", "--wt=review"] } as any);
+    expect(result).toEqual({ ok: true, output: "tile 4" });
+
     result = await tileHandler({ source: "cli", args: ["clean"] } as any);
     expect(result).toEqual({ ok: true, output: "tile clean" });
 
@@ -161,6 +164,7 @@ describe("tile plugin index coverage", () => {
       { count: 0, opts: { wt: false, path: undefined, cmd: undefined, shell: false, engine: undefined } },
       { count: 3, opts: { wt: "explore", path: "src", cmd: "bun test", shell: true, engine: "claude" } },
       { count: 2, opts: { wt: true, path: undefined, cmd: undefined, shell: false, engine: undefined } },
+      { count: 4, opts: { wt: "review", path: undefined, cmd: undefined, shell: false, engine: undefined } },
     ]);
     expect(tileCleanCalls).toBe(1);
     expect(tileSwapCalls).toEqual([{ a: "%1", b: "tile-2" }]);

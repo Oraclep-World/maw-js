@@ -3,8 +3,9 @@ import { listSessions, sendKeys, getPaneCommand, resolveTarget } from "maw-js/sd
 import { runHook } from "maw-js/sdk";
 import { resolveOraclePane } from "maw-js/commands/shared/comm-send";
 import { appendFile, mkdir } from "fs/promises";
-import { homedir, hostname } from "os";
-import { join } from "path";
+import { hostname } from "os";
+import { dirname } from "path";
+import { mawMessageLogPath } from "../../../core/xdg";
 
 const ORACLE_URL = () => process.env.ORACLE_URL || loadConfig().oracleUrl;
 
@@ -181,8 +182,7 @@ export async function cmdTalkTo(target: string, message: string, force = false) 
   await runHook("after_send", { to: target, message: notification });
 
   // Log to maw-log.jsonl
-  const logDir = join(homedir(), ".oracle");
-  const logFile = join(logDir, "maw-log.jsonl");
+  const logFile = mawMessageLogPath();
   const host = hostname();
   const sid = process.env.CLAUDE_SESSION_ID || null;
   const ch = threadResult ? `thread:${threadResult.thread_id}` : undefined;
@@ -196,7 +196,7 @@ export async function cmdTalkTo(target: string, message: string, force = false) 
     sid,
     ch,
   }) + "\n";
-  try { await mkdir(logDir, { recursive: true }); await appendFile(logFile, line); } catch (e) { console.error(`\x1b[33m⚠\x1b[0m talk-to log write failed: ${e}`); }
+  try { await mkdir(dirname(logFile), { recursive: true }); await appendFile(logFile, line); } catch (e) { console.error(`\x1b[33m⚠\x1b[0m talk-to log write failed: ${e}`); }
 
   console.log(`\x1b[32m✓\x1b[0m thread #${threadResult?.thread_id ?? "?"} + sent → ${tmuxTarget}`);
 }

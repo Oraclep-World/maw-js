@@ -69,6 +69,7 @@ const realSpawn = Bun.spawn;
 const realConsole = {
   log: console.log,
   warn: console.warn,
+  stderrWrite: process.stderr.write,
 };
 
 type SpawnProc = ReturnType<typeof Bun.spawn>;
@@ -135,12 +136,19 @@ async function captureConsole<T>(fn: () => T | Promise<T>) {
   const warns: string[] = [];
   console.log = (...args: unknown[]) => { logs.push(args.map(String).join(" ")); };
   console.warn = (...args: unknown[]) => { warns.push(args.map(String).join(" ")); };
+  process.stderr.write = ((chunk: string | Uint8Array, ...args: unknown[]) => {
+    const text = String(chunk).trimEnd();
+    if (text.startsWith("⚠ ")) warns.push(text.slice(2));
+    else if (text) logs.push(text);
+    return realConsole.stderrWrite.call(process.stderr, chunk as string, ...(args as []));
+  }) as typeof process.stderr.write;
   try {
     const result = await fn();
     return { result, logs, warns };
   } finally {
     console.log = realConsole.log;
     console.warn = realConsole.warn;
+    process.stderr.write = realConsole.stderrWrite;
   }
 }
 
@@ -165,6 +173,7 @@ afterEach(() => {
   Date.now = realDateNow;
   console.log = realConsole.log;
   console.warn = realConsole.warn;
+  process.stderr.write = realConsole.stderrWrite;
 });
 
 afterAll(() => {
@@ -172,6 +181,7 @@ afterAll(() => {
   (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = realSpawn;
   console.log = realConsole.log;
   console.warn = realConsole.warn;
+  process.stderr.write = realConsole.stderrWrite;
 });
 
 describe("workspace-auth isolated branch coverage", () => {

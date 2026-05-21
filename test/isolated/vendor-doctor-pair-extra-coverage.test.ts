@@ -271,6 +271,7 @@ describe("doctor impl extra branch coverage", () => {
     const all = await doctorModule.cmdDoctor(["all"]);
     expect(all.checks.map((c) => c.name)).toEqual([
       "install",
+      "xdg:paths",
       "version:pm2",
       "peers:duplicates",
       "peers:stale",

@@ -21,6 +21,7 @@ import { join } from "path";
 
 const SANDBOX = mkdtempSync(join(tmpdir(), "maw-fleet-init-consolidate-"));
 const FLEET_DIR = join(SANDBOX, "config", "fleet");
+const WRITE_FLEET_DIR = join(SANDBOX, "home", "fleet");
 const GHQ_ROOT = join(SANDBOX, "ghq");
 
 process.env.MAW_HOME = join(SANDBOX, "home");
@@ -38,6 +39,9 @@ let ghqListReturn: string[] = [];
 
 mock.module(sdkPath, () => ({
   FLEET_DIR,
+  tmux: {
+    run: async () => "",
+  },
   hostExec: async (command: string) => {
     hostExecCalls.push(command);
     return await hostExecHandler(command);
@@ -62,6 +66,7 @@ const { cmdFleetInit } = await import(
 function resetSandbox() {
   rmSync(SANDBOX, { recursive: true, force: true });
   mkdirSync(FLEET_DIR, { recursive: true });
+  mkdirSync(WRITE_FLEET_DIR, { recursive: true });
   mkdirSync(join(GHQ_ROOT, "github.com"), { recursive: true });
 }
 
@@ -88,7 +93,7 @@ function writeDisabledConfig(file: string, payload: unknown) {
 }
 
 function readFleetConfig(file: string) {
-  return JSON.parse(readFileSync(join(FLEET_DIR, file), "utf-8"));
+  return JSON.parse(readFileSync(join(WRITE_FLEET_DIR, file), "utf-8"));
 }
 
 function repoPath(repo: string) {
@@ -237,7 +242,7 @@ describe("cmdFleetConsolidate", () => {
 
 describe("cmdFleetInit", () => {
   test("scans ghq repos, groups known oracles, writes worktrees, cleans stale configs, and adds overview", async () => {
-    writeFileSync(join(FLEET_DIR, "stale.json"), "{}");
+    writeFileSync(join(WRITE_FLEET_DIR, "stale.json"), "{}");
 
     const orgRoot = join(GHQ_ROOT, "github.com", "Soul-Brews-Studio");
     ghqListReturn = [
@@ -267,7 +272,7 @@ describe("cmdFleetInit", () => {
     };
 
     const output = stripAnsi(await captureLogs(() => cmdFleetInit()));
-    const files = readdirSync(FLEET_DIR).sort();
+    const files = readdirSync(WRITE_FLEET_DIR).sort();
 
     expect(files).toEqual([
       "01-pulse.json",
@@ -310,6 +315,7 @@ describe("cmdFleetInit", () => {
     expect(output).toContain("✓ 01-pulse.json — 3 windows");
     expect(output).toContain("✓ 99-overview.json — 1 window");
     expect(output).toContain("6 fleet configs written");
+    expect(output).toContain(WRITE_FLEET_DIR);
     expect(output).toContain("maw wake all");
     expect(hostExecCalls).toHaveLength(5);
   });
@@ -323,9 +329,10 @@ describe("cmdFleetInit", () => {
 
     const output = await captureLogs(() => cmdFleetInit());
 
-    expect(readdirSync(FLEET_DIR)).toEqual([]);
+    expect(readdirSync(WRITE_FLEET_DIR)).toEqual([]);
     expect(hostExecCalls).toEqual([]);
     expect(output).toContain("Writing fleet configs");
-    expect(output).toContain("1 fleet configs written to fleet/");
+    expect(output).toContain("0 fleet configs written");
+    expect(output).toContain(WRITE_FLEET_DIR);
   });
 });

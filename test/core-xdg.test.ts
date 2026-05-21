@@ -3,18 +3,23 @@ import { homedir } from "os";
 import { join } from "path";
 import {
   isMawXdgEnabled,
+  legacyMawPath,
   mawCacheDir,
   mawCachePath,
   mawConfigDir,
   mawConfigPath,
   mawDataDir,
   mawDataPath,
+  mawHookConfigCandidatePaths,
+  mawMessageLogCandidatePaths,
+  mawMessageLogPath,
   mawRuntimeHomeDir,
   mawStateDir,
   mawStatePath,
 } from "../src/core/xdg";
 
 const ENV_KEYS = [
+  "HOME",
   "MAW_HOME",
   "MAW_CONFIG_DIR",
   "MAW_DATA_DIR",
@@ -50,9 +55,27 @@ describe("maw XDG path resolver", () => {
     expect(mawCacheDir()).toBe(join(homedir(), ".maw"));
     expect(mawConfigDir()).toBe(join(homedir(), ".config", "maw"));
     expect(mawDataPath("plugins")).toBe(join(homedir(), ".maw", "plugins"));
+    expect(mawMessageLogPath()).toBe(join(homedir(), ".maw", "maw-log.jsonl"));
+    expect(mawMessageLogCandidatePaths()).toEqual([
+      join(homedir(), ".maw", "maw-log.jsonl"),
+      join(homedir(), ".oracle", "maw-log.jsonl"),
+    ]);
+    expect(mawHookConfigCandidatePaths()).toEqual([
+      join(homedir(), ".config", "maw", "maw.hooks.json"),
+      join(homedir(), ".oracle", "maw.hooks.json"),
+    ]);
     expect(mawStatePath("peers.json")).toBe(join(homedir(), ".maw", "peers.json"));
     expect(mawCachePath("registry-cache.json")).toBe(join(homedir(), ".maw", "registry-cache.json"));
     expect(mawConfigPath("maw.config.json")).toBe(join(homedir(), ".config", "maw", "maw.config.json"));
+  });
+
+  test("legacyMawPath centralizes HOME-based compatibility fallbacks", () => {
+    for (const key of ENV_KEYS) delete process.env[key];
+    process.env.HOME = "/legacy-home";
+
+    expect(legacyMawPath()).toBe("/legacy-home/.maw");
+    expect(legacyMawPath("peers.json")).toBe("/legacy-home/.maw/peers.json");
+    expect(legacyMawPath("artifacts", "team")).toBe("/legacy-home/.maw/artifacts/team");
   });
 
   test("MAW_XDG flips runtime data/state/cache to XDG bases", () => {
@@ -81,6 +104,7 @@ describe("maw XDG path resolver", () => {
 
     expect(mawConfigDir()).toBe("/maw-config");
     expect(mawDataDir()).toBe("/maw-data");
+    expect(mawMessageLogPath()).toBe("/maw-data/maw-log.jsonl");
     expect(mawStateDir()).toBe("/maw-state");
     expect(mawCacheDir()).toBe("/maw-cache");
   });

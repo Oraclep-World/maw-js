@@ -1,8 +1,8 @@
 import { join } from "path";
 import { existsSync, mkdirSync, rmSync } from "fs";
 import { hostExec } from "../../../sdk";
-import { FLEET_DIR } from "../../../sdk";
 import { ghqList } from "../../../core/ghq";
+import { fleetDirForWrite } from "../../shared/fleet-load";
 
 interface FleetWindow {
   name: string;
@@ -51,7 +51,7 @@ const GROUPS: Record<string, { session: string; order: number }> = {
 };
 
 export async function cmdFleetInit() {
-  const fleetDir = FLEET_DIR;
+  const fleetDir = fleetDirForWrite();
   // Clean old configs to prevent duplicate numbering (#82)
   if (existsSync(fleetDir)) rmSync(fleetDir, { recursive: true });
   mkdirSync(fleetDir, { recursive: true });
@@ -158,6 +158,7 @@ export async function cmdFleetInit() {
     console.log(`  \x1b[32m✓\x1b[0m 99-overview.json — 1 window`);
   }
 
-  console.log(`\n  \x1b[32m${sorted.length + 1} fleet configs written to fleet/\x1b[0m`);
+  const written = sorted.length + (oracleRepos.length > 0 ? 1 : 0);
+  console.log(`\n  \x1b[32m${written} fleet configs written to ${fleetDir}/\x1b[0m`);
   console.log(`  Run \x1b[36mmaw wake all\x1b[0m to start the fleet.\n`);
 }

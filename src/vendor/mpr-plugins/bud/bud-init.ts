@@ -1,7 +1,6 @@
 import { join } from "path";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
-import { loadFleetEntries } from "maw-js/commands/shared/fleet-load";
-import { FLEET_DIR } from "maw-js/sdk";
+import { fleetDirForWrite, loadFleetEntries } from "maw-js/commands/shared/fleet-load";
 
 /** Step 2: Create ψ/ vault directory structure. Returns the psiDir path. */
 export function initVault(budRepoPath: string): string {
@@ -88,7 +87,7 @@ export function configureFleet(name: string, org: string, budRepoName: string, p
   let fleetFile: string;
 
   if (existing) {
-    fleetFile = join(FLEET_DIR, existing.file);
+    fleetFile = existing.path ?? join(fleetDirForWrite(), existing.file);
     const cfg = JSON.parse(readFileSync(fleetFile, "utf-8"));
     let updated = false;
     if (!cfg.budded_from && parentName) { cfg.budded_from = parentName; updated = true; }
@@ -102,7 +101,9 @@ export function configureFleet(name: string, org: string, budRepoName: string, p
   } else {
     const maxNum = entries.reduce((max, e) => Math.max(max, e.num), 0);
     const budNum = maxNum + 1;
-    fleetFile = join(FLEET_DIR, `${String(budNum).padStart(2, "0")}-${name}.json`);
+    const writeDir = fleetDirForWrite();
+    mkdirSync(writeDir, { recursive: true });
+    fleetFile = join(writeDir, `${String(budNum).padStart(2, "0")}-${name}.json`);
     const fleetConfig: Record<string, unknown> = {
       name: `${String(budNum).padStart(2, "0")}-${name}`,
       windows: [{ name: `${name}-oracle`, repo: `${org}/${budRepoName}` }],

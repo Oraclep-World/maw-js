@@ -22,9 +22,13 @@ const HASH_B = "b".repeat(64);
 
 let tmp: string;
 let originalLock: string | undefined;
+let originalHome: string | undefined;
+let originalData: string | undefined;
 
 beforeEach(() => {
   originalLock = process.env.MAW_PLUGINS_LOCK;
+  originalHome = process.env.MAW_HOME;
+  originalData = process.env.MAW_DATA_DIR;
   tmp = mkdtempSync(join(tmpdir(), "maw-init-plugin-lock-"));
   process.env.MAW_PLUGINS_LOCK = join(tmp, "nested", "plugins.lock");
 });
@@ -32,6 +36,10 @@ beforeEach(() => {
 afterEach(() => {
   if (originalLock === undefined) delete process.env.MAW_PLUGINS_LOCK;
   else process.env.MAW_PLUGINS_LOCK = originalLock;
+  if (originalHome === undefined) delete process.env.MAW_HOME;
+  else process.env.MAW_HOME = originalHome;
+  if (originalData === undefined) delete process.env.MAW_DATA_DIR;
+  else process.env.MAW_DATA_DIR = originalData;
   rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -77,6 +85,23 @@ describe("vendor init plugin-lock read/write operations", () => {
   test("lockPath honors MAW_PLUGINS_LOCK and readLock returns an empty first-use lock", () => {
     expect(lockPath()).toBe(process.env.MAW_PLUGINS_LOCK!);
     expect(readLock()).toMatchObject({ schema: LOCK_SCHEMA, plugins: {} });
+  });
+
+  test("lockPath follows MAW_DATA_DIR when the explicit lock override is absent", () => {
+    const dataDir = join(tmp, "data");
+    delete process.env.MAW_PLUGINS_LOCK;
+    delete process.env.MAW_HOME;
+    process.env.MAW_DATA_DIR = dataDir;
+
+    expect(lockPath()).toBe(join(dataDir, "plugins.lock"));
+    writeLock({
+      schema: LOCK_SCHEMA,
+      updated: "old timestamp is replaced on write",
+      plugins: {
+        health: { version: "1.0.0", sha256: HASH_A, source: "./health.tgz", added: "2026-04-01T00:00:00.000Z" },
+      },
+    });
+    expect(existsSync(join(dataDir, "plugins.lock"))).toBe(true);
   });
 
   test("writeLock creates parent directories, writes mode 0644, and readLock warns but proceeds on loose mode", () => {

@@ -1,13 +1,14 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, readlinkSync, rmSync } from "fs";
+import { chmodSync, mkdtempSync, mkdirSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
-import { join } from "path";
+import { join, relative } from "path";
 import {
   attachToSession,
   createWorktree,
   wakeSessionDeps,
   ensureSessionRunning,
   isPaneIdle,
+  reconcileParentClaudeDir,
 } from "../src/commands/shared/wake-session";
 
 const originalTmux = process.env.TMUX;
@@ -310,6 +311,97 @@ describe("createWorktree", () => {
       expect(readlinkSync(join(wtPath, ".claude"))).toBe("../repo/.claude");
       expect(logs.join("\n")).toContain(".claude:");
     } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("backfills existing worktree .claude/skills directories from the parent", async () => {
+    const root = mkdtempSync(join(tmpdir(), "maw-wt-skills-"));
+    const repoPath = join(root, "repo");
+    const wtPath = join(root, "repo.wt-1-white");
+    const logs: string[] = [];
+
+    try {
+      mkdirSync(join(repoPath, ".claude", "skills", "dig"), { recursive: true });
+      mkdirSync(join(repoPath, ".claude", "skills", "calver"), { recursive: true });
+      mkdirSync(join(wtPath, ".claude", "skills", "dig"), { recursive: true });
+
+      await reconcileParentClaudeDir(repoPath, wtPath, (...args: unknown[]) => logs.push(args.map(String).join(" ")));
+
+      expect(readlinkSync(join(wtPath, ".claude", "skills"))).toBe(
+        relative(join(wtPath, ".claude"), join(repoPath, ".claude", "skills")),
+      );
+      expect(logs.join("\n")).toContain(".claude/skills:");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("reports .claude share failures when the worktree parent is absent", async () => {
+    const root = mkdtempSync(join(tmpdir(), "maw-wt-claude-error-"));
+    const repoPath = join(root, "repo");
+    const wtPath = join(root, "missing", "repo.wt-1-white");
+    const logs: string[] = [];
+
+    try {
+      mkdirSync(join(repoPath, ".claude", "skills"), { recursive: true });
+
+      await reconcileParentClaudeDir(repoPath, wtPath, (...args: unknown[]) => logs.push(args.map(String).join(" ")));
+
+      expect(logs.join("\n")).toContain(".claude share skipped");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("skips unsafe existing worktree .claude/skills shapes", async () => {
+    const root = mkdtempSync(join(tmpdir(), "maw-wt-skills-shapes-"));
+    const repoPath = join(root, "repo");
+    const wtPath = join(root, "repo.wt-1-white");
+    const logs: string[] = [];
+
+    try {
+      mkdirSync(join(repoPath, ".claude", "skills", "dig"), { recursive: true });
+      mkdirSync(join(wtPath, ".claude"), { recursive: true });
+      writeFileSync(join(wtPath, ".claude", "skills"), "not a directory");
+
+      await reconcileParentClaudeDir(repoPath, wtPath, (...args: unknown[]) => logs.push(args.map(String).join(" ")));
+      expect(logs.join("\n")).toContain("existing non-directory");
+
+      rmSync(join(wtPath, ".claude", "skills"), { force: true });
+      mkdirSync(join(wtPath, ".claude", "skills", "local-only"), { recursive: true });
+      logs.length = 0;
+
+      await reconcileParentClaudeDir(repoPath, wtPath, (...args: unknown[]) => logs.push(args.map(String).join(" ")));
+      expect(logs.join("\n")).toContain("local-only skills present");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("reports unreadable and pre-existing broken skills links without aborting wake", async () => {
+    const root = mkdtempSync(join(tmpdir(), "maw-wt-skills-errors-"));
+    const repoPath = join(root, "repo");
+    const wtPath = join(root, "repo.wt-1-white");
+    const logs: string[] = [];
+
+    try {
+      mkdirSync(join(repoPath, ".claude", "skills", "dig"), { recursive: true });
+      mkdirSync(join(wtPath, ".claude", "skills"), { recursive: true });
+      chmodSync(join(wtPath, ".claude", "skills"), 0);
+
+      await reconcileParentClaudeDir(repoPath, wtPath, (...args: unknown[]) => logs.push(args.map(String).join(" ")));
+      chmodSync(join(wtPath, ".claude", "skills"), 0o755);
+
+      rmSync(join(wtPath, ".claude", "skills"), { recursive: true, force: true });
+      symlinkSync(join(root, "missing-target"), join(wtPath, ".claude", "skills"), "dir");
+      logs.length = 0;
+
+      await reconcileParentClaudeDir(repoPath, wtPath, (...args: unknown[]) => logs.push(args.map(String).join(" ")));
+
+      expect(logs.join("\n")).toContain(".claude/skills share skipped");
+    } finally {
+      try { chmodSync(join(wtPath, ".claude", "skills"), 0o755); } catch {}
       rmSync(root, { recursive: true, force: true });
     }
   });

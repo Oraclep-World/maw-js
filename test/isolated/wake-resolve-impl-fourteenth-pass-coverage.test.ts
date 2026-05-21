@@ -280,13 +280,13 @@ describe("worktree/session resolver fallback branches", () => {
     })).toBeNull();
   });
 
-  test("resolveFleetSession ignores disabled configs, tolerates unreadable JSON, and detectSession ignores stale mapped sessions", async () => {
+  test("resolveFleetSession ignores disabled configs, skips unreadable JSON, and detectSession ignores stale mapped sessions", async () => {
     writeFleet("disabled", { name: "disabled", windows: [{ name: "neo-oracle" }] });
     writeFileSync(join(fleetRoot, "disabled.json.disabled"), JSON.stringify({ windows: [{ name: "ignored-oracle" }] }));
     expect(resolveFleetSession("ignored")).toBeNull();
 
     writeFleet("broken", "{ not json");
-    expect(resolveFleetSession("neo")).toBeNull();
+    expect(resolveFleetSession("neo")).toBe("disabled");
 
     resetFleetDir();
     writeFleet("23-neo-admin", { name: "23-neo-admin", windows: [{ name: "neo-oracle" }] });

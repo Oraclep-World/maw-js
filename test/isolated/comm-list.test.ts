@@ -1210,7 +1210,7 @@ describe("logMessage — real fs under tempdir HOME", () => {
 
     await realLogMessage("test-oracle", "mawjs", "hello world", "local");
 
-    const logPath = join(tmpHome, ".oracle", "maw-log.jsonl");
+    const logPath = join(tmpHome, ".maw", "maw-log.jsonl");
     expect(existsSync(logPath)).toBe(true);
     const body = readFileSync(logPath, "utf-8").trim();
     const parsed = JSON.parse(body.split("\n").pop()!);
@@ -1228,7 +1228,7 @@ describe("logMessage — real fs under tempdir HOME", () => {
 
     await realLogMessage("mba:neo", "mawjs", "cross", "peer:mba");
 
-    const logPath = join(tmpHome, ".oracle", "maw-log.jsonl");
+    const logPath = join(tmpHome, ".maw", "maw-log.jsonl");
     const lines = readFileSync(logPath, "utf-8").trim().split("\n");
     const parsed = JSON.parse(lines[lines.length - 1]);
     expect(parsed.from).toBe("mba:neo");
@@ -1242,7 +1242,7 @@ describe("logMessage — real fs under tempdir HOME", () => {
 
     await realLogMessage("oracle", "target", long, "local");
 
-    const logPath = join(tmpHome, ".oracle", "maw-log.jsonl");
+    const logPath = join(tmpHome, ".maw", "maw-log.jsonl");
     const lines = readFileSync(logPath, "utf-8").trim().split("\n");
     const parsed = JSON.parse(lines[lines.length - 1]);
     expect(parsed.msg.length).toBe(500);

@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readlinkSync } from "fs";
+import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync } from "fs";
 import { execSync } from "child_process";
 import { homedir } from "os";
 import { join, dirname, resolve } from "path";
@@ -6,6 +6,15 @@ import { loadPeers } from "./internal/peers-store";
 import { findDuplicateIdentities, formatDuplicate } from "./internal/duplicate-detect";
 import { loadConfig } from "maw-js/config";
 import { C } from "maw-js/commands/shared/fleet-doctor-fixer";
+import {
+  isMawXdgEnabled,
+  mawCacheDir,
+  mawConfigDir,
+  mawDataDir,
+  mawDataPath,
+  mawStateDir,
+  legacyMawPath,
+} from "../../../core/xdg";
 import { loadManifestCached, invalidateManifest } from "maw-js/lib/oracle-manifest";
 import { findGaps, summarizeGaps } from "./cross-source-detect";
 import { checkMawJsBranch } from "./internal/maw-js-branch-check";
@@ -15,7 +24,7 @@ import { detectBunLinkedCheckout } from "./internal/bun-link-detect";
 
 export interface DoctorResult {
   ok: boolean;
-  checks: Array<{ name: string; ok: boolean; message: string }>;
+  checks: Array<{ name: string; ok: boolean; message: string; details?: unknown }>;
 }
 
 export async function cmdDoctor(args: string[] = []): Promise<DoctorResult> {
@@ -23,7 +32,10 @@ export async function cmdDoctor(args: string[] = []): Promise<DoctorResult> {
   const positional = args.filter(a => !a.startsWith("--"));
   const only = positional[0];
   const allowDrift = flags.has("--allow-drift");
+  const json = flags.has("--json");
   const smoke = flags.has("--smoke") || only === "smoke";
+  const xdgMigrate = flags.has("--migrate") || flags.has("--fix-xdg");
+  const xdgDryRun = flags.has("--dry-run") || flags.has("--plan");
   const checks: DoctorResult["checks"] = [];
 
   // #1238 — `maw doctor --fix-stale` short-circuits the normal check
@@ -39,6 +51,9 @@ export async function cmdDoctor(args: string[] = []): Promise<DoctorResult> {
   } else {
     if (!only || only === "install" || only === "all") {
       checks.push(await checkInstall());
+    }
+    if (only === "xdg" || only === "all") {
+      checks.push(xdgMigrate ? migrateXdgLayout({ dryRun: xdgDryRun }) : checkXdgLayout());
     }
     if (!only || only === "version" || only === "all") {
       const vChecks = await checkVersionDrift();
@@ -62,7 +77,8 @@ export async function cmdDoctor(args: string[] = []): Promise<DoctorResult> {
   const hardOk = checks.every(c => c.ok);
   const onlyDriftFails = !hardOk && checks.every(c => c.ok || c.name.startsWith("version:"));
   const ok = hardOk || (allowDrift && onlyDriftFails);
-  renderResults(checks, ok);
+  if (json) renderJsonResults(checks, ok);
+  else renderResults(checks, ok);
   return { ok, checks };
 }
 
@@ -108,6 +124,286 @@ async function checkInstall(): Promise<{ name: string; ok: boolean; message: str
     }
   } catch { /* not a symlink — that's fine */ }
   return { name: "install", ok: true, message: "maw binary present and resolvable" };
+}
+
+function checkXdgLayout(): DoctorResult["checks"][number] {
+  const legacyRuntime = legacyMawPath();
+  const legacyRuntimeState = existsSync(legacyRuntime) ? "present" : "missing";
+  const configRuntimeArtifacts = existingXdgArtifacts(mawConfigDir(), CONFIG_RUNTIME_ARTIFACTS);
+  const legacyRuntimeArtifacts = existingXdgArtifacts(legacyRuntime, LEGACY_RUNTIME_ARTIFACTS);
+  const mode = process.env.MAW_HOME
+    ? `MAW_HOME=${process.env.MAW_HOME}`
+    : isMawXdgEnabled()
+      ? "MAW_XDG=on"
+      : "MAW_XDG=off";
+  const nextAction = xdgNextAction(configRuntimeArtifacts, legacyRuntimeArtifacts);
+  const details = {
+    mode,
+    paths: {
+      config: mawConfigDir(),
+      state: mawStateDir(),
+      data: mawDataDir(),
+      cache: mawCacheDir(),
+      legacyRuntime,
+    },
+    legacyRuntimeState,
+    artifacts: {
+      configRuntime: configRuntimeArtifacts,
+      legacyRuntime: legacyRuntimeArtifacts,
+    },
+    nextAction,
+  };
+
+  return {
+    name: "xdg:paths",
+    ok: true,
+    message: [
+      mode,
+      `config=${mawConfigDir()}`,
+      `state=${mawStateDir()}`,
+      `data=${mawDataDir()}`,
+      `cache=${mawCacheDir()}`,
+      `legacy ~/.maw ${legacyRuntimeState}`,
+      artifactSummary("config-runtime", configRuntimeArtifacts),
+      artifactSummary("legacy-runtime", legacyRuntimeArtifacts),
+      `action=${nextAction}`,
+    ].join("; "),
+    details,
+  };
+}
+
+const CONFIG_RUNTIME_ARTIFACTS = [
+  "audit.jsonl",
+  "fleet-resume.log",
+  "snapshots",
+  "fleet",
+  "teams",
+  "workspaces",
+  "tab-order",
+  "message-ledger.sqlite",
+  "oracle-births.json",
+  "oracles.json",
+  "peer-key",
+  "auth-secret",
+  "session-warnings.state",
+  "pending",
+  "parked",
+  "trust.json",
+  "consent-pending",
+] as const;
+
+const LEGACY_RUNTIME_ARTIFACTS = [
+  "plugins",
+  "node_modules",
+  "sessions",
+  "state",
+  "inbox",
+  "schedules",
+  "teams",
+  "peers.json",
+  "audit.jsonl",
+  "artifacts",
+  "inst",
+  "ui",
+  "message-ledger.sqlite",
+  "nicknames.json",
+] as const;
+
+function existingXdgArtifacts(base: string, names: readonly string[]): string[] {
+  return names.filter((name) => existsSync(join(base, name)));
+}
+
+function artifactSummary(label: string, names: string[]): string {
+  if (names.length === 0) return `${label}=0`;
+  const preview = names.slice(0, 8).join(",");
+  const suffix = names.length > 8 ? `,+${names.length - 8}` : "";
+  return `${label}=${names.length} [${preview}${suffix}]`;
+}
+
+function xdgNextAction(configRuntimeArtifacts: string[], legacyRuntimeArtifacts: string[]): string {
+  if (configRuntimeArtifacts.length > 0 && legacyRuntimeArtifacts.length > 0) {
+    return "mixed-runtime-state: run 'maw doctor xdg --migrate --dry-run', then 'maw doctor xdg --migrate'";
+  }
+  if (configRuntimeArtifacts.length > 0) {
+    return "config-runtime-state: run 'maw doctor xdg --migrate' to copy runtime/cache/data artifacts out of config dir";
+  }
+  if (legacyRuntimeArtifacts.length > 0 && isMawXdgEnabled()) {
+    return "legacy-runtime-state: run 'maw doctor xdg --migrate' while read-through fallback is active";
+  }
+  return "ok";
+}
+
+type XdgBucket = "state" | "data" | "cache";
+type XdgMigrationSource = "config" | "legacy";
+type XdgMigrationOutcome = "copied" | "dry-run" | "missing" | "exists" | "same" | "error";
+
+interface XdgMigrationItem {
+  sourceKind: XdgMigrationSource;
+  name: string;
+  bucket: XdgBucket;
+  source: string;
+  destination: string;
+  outcome?: XdgMigrationOutcome;
+  message?: string;
+}
+
+const CONFIG_MIGRATION_TARGETS: Record<(typeof CONFIG_RUNTIME_ARTIFACTS)[number], XdgBucket> = {
+  "audit.jsonl": "state",
+  "fleet-resume.log": "state",
+  snapshots: "state",
+  fleet: "state",
+  teams: "state",
+  workspaces: "data",
+  "tab-order": "state",
+  "message-ledger.sqlite": "data",
+  "oracle-births.json": "cache",
+  "oracles.json": "cache",
+  "peer-key": "state",
+  "auth-secret": "state",
+  "session-warnings.state": "state",
+  pending: "state",
+  parked: "state",
+  "trust.json": "state",
+  "consent-pending": "state",
+};
+
+const LEGACY_MIGRATION_TARGETS: Record<(typeof LEGACY_RUNTIME_ARTIFACTS)[number], XdgBucket> = {
+  plugins: "data",
+  node_modules: "cache",
+  sessions: "state",
+  state: "state",
+  inbox: "data",
+  schedules: "state",
+  teams: "state",
+  "peers.json": "state",
+  "audit.jsonl": "state",
+  artifacts: "cache",
+  inst: "data",
+  ui: "data",
+  "message-ledger.sqlite": "data",
+  "nicknames.json": "cache",
+};
+
+function absoluteXdgEnv(name: string): string | null {
+  const value = process.env[name];
+  return value && value.startsWith("/") ? value : null;
+}
+
+function xdgSpecBase(envName: string, ...fallback: string[]): string {
+  return absoluteXdgEnv(envName) ?? join(homedir(), ...fallback);
+}
+
+function xdgMigrationDir(bucket: XdgBucket): string {
+  if (process.env.MAW_HOME) return process.env.MAW_HOME;
+  if (bucket === "state") return process.env.MAW_STATE_DIR || join(xdgSpecBase("XDG_STATE_HOME", ".local", "state"), "maw");
+  if (bucket === "data") return process.env.MAW_DATA_DIR || join(xdgSpecBase("XDG_DATA_HOME", ".local", "share"), "maw");
+  return process.env.MAW_CACHE_DIR || join(xdgSpecBase("XDG_CACHE_HOME", ".cache"), "maw");
+}
+
+function xdgMigrationDestination(bucket: XdgBucket, name: string): string {
+  return join(xdgMigrationDir(bucket), name);
+}
+
+function buildXdgMigrationPlan(): XdgMigrationItem[] {
+  const configBase = mawConfigDir();
+  const legacyBase = legacyMawPath();
+  const items: XdgMigrationItem[] = [];
+
+  for (const name of CONFIG_RUNTIME_ARTIFACTS) {
+    const bucket = CONFIG_MIGRATION_TARGETS[name];
+    items.push({
+      sourceKind: "config",
+      name,
+      bucket,
+      source: join(configBase, name),
+      destination: xdgMigrationDestination(bucket, name),
+    });
+  }
+
+  for (const name of LEGACY_RUNTIME_ARTIFACTS) {
+    const bucket = LEGACY_MIGRATION_TARGETS[name];
+    items.push({
+      sourceKind: "legacy",
+      name,
+      bucket,
+      source: join(legacyBase, name),
+      destination: xdgMigrationDestination(bucket, name),
+    });
+  }
+
+  return items;
+}
+
+function copyXdgArtifact(item: XdgMigrationItem, dryRun: boolean): XdgMigrationItem {
+  if (!existsSync(item.source)) return { ...item, outcome: "missing" };
+  if (resolve(item.source) === resolve(item.destination)) return { ...item, outcome: "same" };
+  if (existsSync(item.destination)) return { ...item, outcome: "exists" };
+  if (dryRun) return { ...item, outcome: "dry-run" };
+
+  try {
+    const stat = lstatSync(item.source);
+    mkdirSync(dirname(item.destination), { recursive: true });
+    cpSync(item.source, item.destination, {
+      recursive: stat.isDirectory(),
+      force: false,
+      errorOnExist: true,
+      preserveTimestamps: true,
+    });
+    return { ...item, outcome: "copied" };
+  } catch (e: any) {
+    return { ...item, outcome: "error", message: e?.message || String(e) };
+  }
+}
+
+function summarizeMigration(items: XdgMigrationItem[]): Record<XdgMigrationOutcome, number> {
+  const summary: Record<XdgMigrationOutcome, number> = {
+    copied: 0,
+    "dry-run": 0,
+    missing: 0,
+    exists: 0,
+    same: 0,
+    error: 0,
+  };
+  for (const item of items) summary[item.outcome || "missing"]++;
+  return summary;
+}
+
+function migrateXdgLayout(opts: { dryRun: boolean }): DoctorResult["checks"][number] {
+  const planned = buildXdgMigrationPlan().map(item => copyXdgArtifact(item, opts.dryRun));
+  const summary = summarizeMigration(planned);
+  const actionable = planned.filter(item => item.outcome === "copied" || item.outcome === "dry-run" || item.outcome === "error");
+  const preview = actionable
+    .slice(0, 8)
+    .map(item => `${item.sourceKind}:${item.name}->${item.bucket}:${item.outcome}`)
+    .join(", ");
+  const suffix = actionable.length > 8 ? `,+${actionable.length - 8}` : "";
+  const mode = opts.dryRun ? "dry-run" : "apply";
+  const ok = summary.error === 0;
+  return {
+    name: "xdg:migrate",
+    ok,
+    message: [
+      mode,
+      `copied=${summary.copied}`,
+      `planned=${summary["dry-run"]}`,
+      `exists=${summary.exists}`,
+      `missing=${summary.missing}`,
+      `same=${summary.same}`,
+      `errors=${summary.error}`,
+      preview ? `[${preview}${suffix}]` : "no actionable artifacts",
+    ].join("; "),
+    details: {
+      mode,
+      targets: {
+        state: xdgMigrationDir("state"),
+        data: xdgMigrationDir("data"),
+        cache: xdgMigrationDir("cache"),
+      },
+      summary,
+      items: planned,
+      note: "safe copy-forward only: existing destinations are preserved and legacy sources are not deleted",
+    },
+  };
 }
 
 /**
@@ -324,6 +620,18 @@ function renderResults(checks: DoctorResult["checks"], ok: boolean): void {
   console.log("");
 }
 
+function renderJsonResults(checks: DoctorResult["checks"], ok: boolean): void {
+  console.log(JSON.stringify({
+    ok,
+    checks: checks.map(c => ({
+      name: c.name,
+      ok: c.ok,
+      message: c.message,
+      ...(c.details === undefined ? {} : { details: c.details }),
+    })),
+  }, null, 2));
+}
+
 function iconFor(c: { name: string; ok: boolean; message: string }): string {
   if (c.ok) return C.green + "✓";
   if (c.name.startsWith("version:") && c.message.startsWith("drift")) return C.yellow + "⚠";
@@ -372,10 +680,14 @@ async function smokeCmd(label: string, args: string[]): Promise<SmokeCheck> {
   }
 }
 
+function doctorPluginDir(): string {
+  return process.env.MAW_PLUGINS_DIR || mawDataPath("plugins");
+}
+
 function smokePluginCount(): SmokeCheck {
   const { readdirSync, lstatSync } = require("fs");
   const { join } = require("path");
-  const dir = join(homedir(), ".maw", "plugins");
+  const dir = doctorPluginDir();
   try {
     const entries = readdirSync(dir) as string[];
     const broken = entries.filter((e: string) => {
@@ -394,7 +706,7 @@ function smokePluginCount(): SmokeCheck {
 function smokeBrokenSymlinks(): SmokeCheck {
   const { readdirSync, lstatSync } = require("fs");
   const { join } = require("path");
-  const dir = join(homedir(), ".maw", "plugins");
+  const dir = doctorPluginDir();
   try {
     const entries = readdirSync(dir) as string[];
     const broken: string[] = [];

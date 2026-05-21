@@ -225,7 +225,10 @@ describe("coverage next tile impl", () => {
     await tileImpl.cmdTile(1, { engine: "fast" });
 
     const split = hostExecCalls.find((cmd) => cmd.includes("tmux split-window"));
-    expect(split).toContain("run-fast; exec zsh");
+    expect(split).toContain("exec zsh");
+    expect(split).not.toContain("run-fast");
+    expect(hostExecCalls).toContain("tmux send-keys -t '%new' -l 'run-fast'");
+    expect(hostExecCalls).toContain("tmux send-keys -t '%new' Enter");
     expect(split).toContain("MAW_TILE_INDEX='\\''2'\\''");
     expect(borderCalls).toEqual([["%new", "sess-tile-2", "color-0"]]);
     expect(layoutCalls).toContain("enable:@win");

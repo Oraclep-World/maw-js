@@ -10,10 +10,14 @@
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
-import { FLEET_DIR, listSessions } from "../../../sdk";
+import { listSessions } from "../../../sdk";
 import { getGhqRoot } from "../../../config/ghq-root";
 import type { OracleEntry } from "../../../sdk";
-import { CACHE_FILE, LEGACY_CACHE_FILE } from "../../../core/fleet/registry-oracle-types";
+import {
+  registryCacheFilePath,
+  legacyRegistryCacheFilePath,
+} from "../../../core/fleet/registry-oracle-types";
+import { fleetDirsForRead, uniqueDirs } from "../../../core/fleet/paths";
 
 
 export interface RegisterOpts {
@@ -37,44 +41,56 @@ export interface RegisterDeps {
 
 export function findInFleet(
   name: string,
-  fleetDir: string = FLEET_DIR,
+  fleetDirOrDirs: string | string[] = fleetDirsForRead(),
 ): DiscoveredOracle | null {
   try {
-    for (const file of readdirSync(fleetDir).filter((f) => f.endsWith(".json"))) {
-      let config: any;
+    const dirs = Array.isArray(fleetDirOrDirs) ? uniqueDirs(fleetDirOrDirs) : [fleetDirOrDirs];
+    const seenFiles = new Set<string>();
+    for (const fleetDir of dirs) {
+      let files: string[];
       try {
-        config = JSON.parse(readFileSync(join(fleetDir, file), "utf-8"));
+        files = readdirSync(fleetDir).filter((f) => f.endsWith(".json")).sort();
       } catch { continue; }
 
-      const windows: any[] = config.windows || [];
-      const hasThis = windows.some(
-        (w) => w.name === `${name}-oracle` || w.name === name,
-      );
-      if (!hasThis) continue;
+      for (const file of files) {
+        if (seenFiles.has(file)) continue;
+        seenFiles.add(file);
 
-      // Derive repo from fleet file or windows
-      const repos: string[] = config.project_repos || [];
-      const repoFull = repos.find((r) => r.endsWith(`/${name}-oracle`) || r.endsWith(`/${name}`));
-      const parts = repoFull ? repoFull.split("/") : [];
-      const org = parts[0] || "(unknown)";
-      const repo = parts[1] || `${name}-oracle`;
-      const now = new Date().toISOString();
+        let config: any;
+        try {
+          config = JSON.parse(readFileSync(join(fleetDir, file), "utf-8"));
+        } catch { continue; }
 
-      return {
-        source: "fleet",
-        entry: {
-          org,
-          repo,
-          name,
-          local_path: "",
-          has_psi: false,
-          has_fleet_config: true,
-          budded_from: config.budded_from || null,
-          budded_at: config.budded_at || null,
-          federation_node: null,
-          detected_at: now,
-        },
-      };
+        const windows: any[] = config.windows || [];
+        const hasThis = windows.some(
+          (w) => w.name === `${name}-oracle` || w.name === name,
+        );
+        if (!hasThis) continue;
+
+        // Derive repo from fleet file or windows
+        const repos: string[] = config.project_repos || [];
+        const repoFull = repos.find((r) => r.endsWith(`/${name}-oracle`) || r.endsWith(`/${name}`));
+        const parts = repoFull ? repoFull.split("/") : [];
+        const org = parts[0] || "(unknown)";
+        const repo = parts[1] || `${name}-oracle`;
+        const now = new Date().toISOString();
+
+        return {
+          source: "fleet",
+          entry: {
+            org,
+            repo,
+            name,
+            local_path: "",
+            has_psi: false,
+            has_fleet_config: true,
+            budded_from: config.budded_from || null,
+            budded_at: config.budded_at || null,
+            federation_node: null,
+            detected_at: now,
+          },
+        };
+      }
     }
   } catch { /* fleet dir may not exist */ }
   return null;
@@ -157,8 +173,9 @@ export function findInFilesystem(
 export function readRawRegistry(file: string): Record<string, unknown> {
   try {
     if (existsSync(file)) return JSON.parse(readFileSync(file, "utf-8"));
-    if (file === CACHE_FILE && existsSync(LEGACY_CACHE_FILE)) {
-      return JSON.parse(readFileSync(LEGACY_CACHE_FILE, "utf-8"));
+    if (file === registryCacheFilePath()) {
+      const legacyFile = legacyRegistryCacheFilePath();
+      if (existsSync(legacyFile)) return JSON.parse(readFileSync(legacyFile, "utf-8"));
     }
   } catch { /* fall through */ }
   return {};
@@ -178,8 +195,9 @@ export async function cmdOracleRegister(
 ): Promise<void> {
   if (!name) throw new Error("register requires a name: maw oracle register <name>");
 
-  const readRawCache = deps.readRawCache ?? (() => readRawRegistry(CACHE_FILE));
-  const writeRawCache = deps.writeRawCache ?? ((data) => writeRawRegistry(CACHE_FILE, data));
+  const registryFile = registryCacheFilePath();
+  const readRawCache = deps.readRawCache ?? (() => readRawRegistry(registryFile));
+  const writeRawCache = deps.writeRawCache ?? ((data) => writeRawRegistry(registryFile, data));
 
   const rawCache = readRawCache();
   const oracles: OracleEntry[] = (rawCache.oracles as OracleEntry[] | undefined) ?? [];

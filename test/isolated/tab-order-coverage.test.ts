@@ -29,7 +29,7 @@ mock.module("../../src/core/transport/tmux", () => ({
   },
 }));
 
-const { restoreTabOrder, saveTabOrder } = await import("../../src/core/fleet/tab-order");
+const { restoreTabOrder, saveTabOrder, tabOrderDir } = await import("../../src/core/fleet/tab-order");
 
 beforeEach(() => {
   rmSync(join(home, "tab-order"), { recursive: true, force: true });
@@ -165,5 +165,28 @@ describe("tab order persistence coverage", () => {
       { cmd: "move-window", args: ["-s", "delta:1", "-t", "delta:4"] },
     ]);
     expect(existsSync(tabOrderPath("delta"))).toBe(false);
+  });
+
+  test("resolves the tab-order state directory at operation time", async () => {
+    const dynamicHome = mkdtempSync(join(tmpdir(), "maw-tab-order-dynamic-"));
+    process.env.MAW_HOME = dynamicHome;
+    try {
+      expect(tabOrderDir()).toBe(join(dynamicHome, "tab-order"));
+      listWindowsQueue = [[
+        { index: 0, name: "main" },
+        { index: 1, name: "logs" },
+      ]];
+
+      await saveTabOrder("dynamic");
+
+      const dynamicFile = join(dynamicHome, "tab-order", "dynamic.json");
+      expect(JSON.parse(readFileSync(dynamicFile, "utf-8"))).toEqual([
+        { index: 0, name: "main" },
+        { index: 1, name: "logs" },
+      ]);
+    } finally {
+      process.env.MAW_HOME = home;
+      rmSync(dynamicHome, { recursive: true, force: true });
+    }
   });
 });

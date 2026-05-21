@@ -1,6 +1,4 @@
-import { readdirSync, readFileSync } from "fs";
-import { join } from "path";
-import { FLEET_DIR } from "maw-js/sdk";
+import { loadFleet } from "maw-js/commands/shared/fleet-load";
 import { discoverPackages } from "maw-js/plugin/registry";
 
 const CORE_COMMANDS = [
@@ -60,12 +58,12 @@ function discoverCommands(): string[] {
 function completionTargets(kind: "oracles" | "windows"): string[] {
   const names = new Set<string>();
   try {
-    for (const f of readdirSync(FLEET_DIR).filter(f => f.endsWith(".json") && !f.endsWith(".disabled"))) {
-      const config = JSON.parse(readFileSync(join(FLEET_DIR, f), "utf-8"));
+    for (const config of loadFleet()) {
       for (const w of (config.windows || [])) {
+        if (typeof w.name !== "string") continue;
         if (kind === "oracles") {
           if (w.name.endsWith("-oracle")) names.add(w.name.replace(/-oracle$/, ""));
-        } else if (typeof w.name === "string") {
+        } else {
           names.add(w.name);
         }
       }

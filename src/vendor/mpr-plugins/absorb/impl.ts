@@ -1,9 +1,9 @@
 import { existsSync } from "fs";
 import { join } from "path";
-import { FLEET_DIR, hostExec } from "maw-js/sdk";
+import { hostExec } from "maw-js/sdk";
 import { getGhqRoot } from "maw-js/config/ghq-root";
 import { loadFleetEntries, type FleetEntry } from "maw-js/commands/shared/fleet-load";
-import { cmdArchive } from "../archive/impl";
+import { cmdArchive, fleetConfigFilePath } from "../archive/impl";
 import { resolveOraclePath } from "../soul-sync/resolve";
 import { syncOracleVaults } from "../soul-sync/sync-helpers";
 
@@ -134,7 +134,7 @@ export async function cmdAbsorb(donor: string, receiver: string, opts: AbsorbOpt
   if (opts.dryRun) {
     console.log(`\n  [dry-run] absorb preview complete; no files, fleet entries, repos, or tmux clients changed.\n`);
   } else {
-    const disabledFile = join(FLEET_DIR, `${donorEntry.file}.disabled`);
+    const disabledFile = `${fleetConfigFilePath(donorEntry)}.disabled`;
     const archived = existsSync(disabledFile) ? "archived" : "archive attempted";
     console.log(`\n  ${donorName} absorbed into ${receiverName}; donor ${archived}.\n`);
   }

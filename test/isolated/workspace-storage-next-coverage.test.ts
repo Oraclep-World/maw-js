@@ -5,16 +5,19 @@ import { join } from "path";
 
 const originalMawHome = process.env.MAW_HOME;
 const originalMawConfigDir = process.env.MAW_CONFIG_DIR;
+const originalMawDataDir = process.env.MAW_DATA_DIR;
 const root = mkdtempSync(join(tmpdir(), "maw-workspace-storage-next-"));
 
 process.env.MAW_HOME = root;
 delete process.env.MAW_CONFIG_DIR;
+delete process.env.MAW_DATA_DIR;
 
 const storage = await import("../../src/api/workspace-storage.ts");
 
 beforeEach(() => {
   storage.workspaces.clear();
   rmSync(storage.WORKSPACE_DIR, { recursive: true, force: true });
+  rmSync(join(root, "config", "workspaces"), { recursive: true, force: true });
 });
 
 afterAll(() => {
@@ -23,6 +26,8 @@ afterAll(() => {
   else process.env.MAW_HOME = originalMawHome;
   if (originalMawConfigDir === undefined) delete process.env.MAW_CONFIG_DIR;
   else process.env.MAW_CONFIG_DIR = originalMawConfigDir;
+  if (originalMawDataDir === undefined) delete process.env.MAW_DATA_DIR;
+  else process.env.MAW_DATA_DIR = originalMawDataDir;
   if (root && existsSync(root)) rmSync(root, { recursive: true, force: true });
 });
 
@@ -42,6 +47,27 @@ function workspace(id: string, joinCode: string, expiresAt: number) {
 }
 
 describe("workspace storage next coverage", () => {
+  test("stores hub workspace data under XDG data with legacy config fallback", () => {
+    expect(storage.WORKSPACE_DIR).toBe(join(root, "workspaces"));
+
+    const legacyDir = join(root, "config", "workspaces");
+    mkdirSync(legacyDir, { recursive: true });
+    writeFileSync(
+      join(legacyDir, "legacy.json"),
+      JSON.stringify(workspace("legacy", "legacy-code", Date.now() + 60_000)),
+      "utf-8",
+    );
+
+    storage.loadAll();
+    expect(storage.workspaces.get("legacy")?.joinCode).toBe("legacy-code");
+
+    const fresh = workspace("fresh", "fresh-code", Date.now() + 60_000);
+    storage.persist(fresh as any);
+
+    expect(existsSync(join(root, "workspaces", "fresh.json"))).toBe(true);
+    expect(existsSync(join(legacyDir, "fresh.json"))).toBe(false);
+  });
+
   test("loadAll creates the workspace directory, loads JSON files, and ignores corrupt/non-json files", () => {
     mkdirSync(storage.WORKSPACE_DIR, { recursive: true });
     writeFileSync(join(storage.WORKSPACE_DIR, "notes.txt"), "not a workspace", "utf-8");

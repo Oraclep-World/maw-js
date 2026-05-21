@@ -15,6 +15,36 @@ function envExport(assignments: Record<string, string>): string {
     .join(" ");
 }
 
+function tileCommandSettleMs(): number {
+  const raw = process.env.MAW_TILE_CMD_SETTLE_MS;
+  if (raw === undefined || raw === "") return 300;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) return 300;
+  return Math.min(parsed, 5_000);
+}
+
+async function sleep(ms: number): Promise<void> {
+  if (ms <= 0) return;
+  await new Promise(r => setTimeout(r, ms));
+}
+
+async function sendTileCommand(paneId: string, command: string): Promise<void> {
+  if (!command) return;
+  const settleMs = tileCommandSettleMs();
+  await sleep(settleMs);
+  try {
+    // #1843 — second parallel tile panes can still be in early shell/TUI boot
+    // when --cmd is typed. Clear any prompt noise before the literal payload,
+    // then delay Enter separately so tmux has time to drain pending input.
+    await hostExec(`tmux send-keys -t '${paneId}' C-u`);
+  } catch {
+    // Best effort only: the literal command send below is the real action.
+  }
+  await hostExec(`tmux send-keys -t '${paneId}' -l ${shellArg(command)}`);
+  await sleep(Math.min(settleMs, 250));
+  await hostExec(`tmux send-keys -t '${paneId}' Enter`);
+}
+
 const TILE_TITLE_RE = /^(?:[A-Za-z0-9_.-]+-)?tile-\d+(?: 🌳)?$/;
 const TILE_WORKTREE_PATH_RE = /\.wt-\d+-(?:[A-Za-z0-9_.-]+-)?tile-\d+$/;
 const TILE_BRANCH_RE = /^agents\/\d+-(?:[A-Za-z0-9_.-]+-)?tile-\d+$/;
@@ -180,6 +210,8 @@ export async function cmdTile(count: number, opts: TileOpts = {}): Promise<void>
       const existing = existingWorktrees.find(w => w.name === sharedWtName || w.path === expectedPath);
       if (existing) {
         sharedWtPath = existing.path;
+        const { reconcileParentClaudeDir } = await import("../../shared/wake-session");
+        await reconcileParentClaudeDir(repoPath, sharedWtPath, console.log.bind(console));
       } else {
         const { createWorktree } = await import("../../shared/wake-session");
         const oracle = repoName.replace(/-oracle$/, "");
@@ -224,11 +256,10 @@ export async function cmdTile(count: number, opts: TileOpts = {}): Promise<void>
       MAW_TILE_WINDOW: windowAddress,
     });
 
-    let shellCmd = `export ${tileEnv}; exec zsh`;
     const launchCmd = requestedCmd || engineCmd;
-    if (launchCmd) {
-      shellCmd = `export ${tileEnv}; ${launchCmd}; exec zsh`;
-    }
+    let shellCmd = requestedCmd
+      ? `export ${tileEnv}; exec zsh -ic ${shellArg(`${requestedCmd}; exec zsh`)}`
+      : `export ${tileEnv}; exec zsh`;
     if (cwd) {
       shellCmd = `cd ${shellArg(cwd)} || exit $?; ${shellCmd}`;
     }
@@ -252,6 +283,7 @@ export async function cmdTile(count: number, opts: TileOpts = {}): Promise<void>
     await hostExec(`tmux set-option -p -t '${paneId}' @maw_tile '1'`);
     await hostExec(`tmux set-option -p -t '${paneId}' @maw_tile_parent ${shellArg(parentAddress)}`);
     await hostExec(`tmux set-option -p -t '${paneId}' @maw_tile_role ${shellArg(name)}`);
+    if (!requestedCmd) await sendTileCommand(paneId, launchCmd);
 
     const extras = [
       cwd ? `\x1b[90m${cwd}\x1b[0m` : "",

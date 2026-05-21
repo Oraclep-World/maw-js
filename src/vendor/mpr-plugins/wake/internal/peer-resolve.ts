@@ -13,9 +13,7 @@
  * URL lookup at dispatch time.
  */
 import { readFileSync, existsSync } from "fs";
-import { join } from "path";
-import { homedir } from "os";
-import { mawStatePath } from "../../../../core/xdg";
+import { legacyMawPath, mawStatePath } from "../../../../core/xdg";
 
 export interface ResolvedPeer {
   url: string;
@@ -28,7 +26,7 @@ function peersPath(): string {
 
 function legacyPeersPath(): string | null {
   if (process.env.PEERS_FILE || process.env.MAW_HOME) return null;
-  const legacy = join(process.env.HOME || homedir(), ".maw", "peers.json");
+  const legacy = legacyMawPath("peers.json");
   return legacy === peersPath() ? null : legacy;
 }
 

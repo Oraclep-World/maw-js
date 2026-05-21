@@ -9,6 +9,12 @@ let sdkCurlFetch: any = { ok: false, status: 500, data: { error: "boom" } };
 let peerKillResponse: any = { ok: false, status: 500, data: { error: "boom" } };
 let execCalls: string[] = [];
 let ghqDir = "";
+const originalEnv = {
+  home: process.env.HOME,
+  mawHome: process.env.MAW_HOME,
+  mawDataDir: process.env.MAW_DATA_DIR,
+  mawXdg: process.env.MAW_XDG,
+};
 
 mock.module("os", () => ({
   homedir: () => homeDir,
@@ -80,6 +86,9 @@ beforeEach(() => {
   execCalls = [];
   ghqDir = join(homeDir, "maw-js");
   mkdirSync(ghqDir, { recursive: true });
+  delete process.env.MAW_HOME;
+  process.env.MAW_DATA_DIR = join(homeDir, ".maw");
+  delete process.env.MAW_XDG;
   console.log = () => undefined;
   console.error = () => undefined;
 });
@@ -87,7 +96,14 @@ beforeEach(() => {
 afterEach(() => {
   rmSync(homeDir, { recursive: true, force: true });
   delete process.env.PEERS_FILE;
-  delete process.env.HOME;
+  if (originalEnv.home === undefined) delete process.env.HOME;
+  else process.env.HOME = originalEnv.home;
+  if (originalEnv.mawHome === undefined) delete process.env.MAW_HOME;
+  else process.env.MAW_HOME = originalEnv.mawHome;
+  if (originalEnv.mawDataDir === undefined) delete process.env.MAW_DATA_DIR;
+  else process.env.MAW_DATA_DIR = originalEnv.mawDataDir;
+  if (originalEnv.mawXdg === undefined) delete process.env.MAW_XDG;
+  else process.env.MAW_XDG = originalEnv.mawXdg;
 });
 
 describe("last five normalized coverage gaps", () => {
@@ -130,7 +146,7 @@ describe("last five normalized coverage gaps", () => {
       const { cmdRestart } = await import("../../src/vendor/mpr-plugins/restart/impl");
       await cmdRestart({ ref: "alpha" });
       expect(execCalls.some((cmd) => cmd.includes("bun link maw"))).toBe(true);
-      expect(existsSync(join(homeDir, ".oracle", "package.json"))).toBe(true);
+      expect(existsSync(join(homeDir, ".maw", "oracle-plugins", "package.json"))).toBe(true);
     } finally {
       os.homedir = originalHomedir;
     }

@@ -20,10 +20,12 @@ import {
 let dir: string;
 const originalHome = process.env.MAW_HOME;
 const originalConfigDir = process.env.MAW_CONFIG_DIR;
+const originalXdgConfigHome = process.env.XDG_CONFIG_HOME;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "maw-profile-loader-direct-"));
   delete process.env.MAW_HOME;
+  delete process.env.XDG_CONFIG_HOME;
   process.env.MAW_CONFIG_DIR = join(dir, "config");
   resetProfileFilterCache();
 });
@@ -33,6 +35,8 @@ afterEach(() => {
   else process.env.MAW_HOME = originalHome;
   if (originalConfigDir === undefined) delete process.env.MAW_CONFIG_DIR;
   else process.env.MAW_CONFIG_DIR = originalConfigDir;
+  if (originalXdgConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
+  else process.env.XDG_CONFIG_HOME = originalXdgConfigHome;
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -47,6 +51,10 @@ describe("profile-loader direct coverage", () => {
     process.env.MAW_HOME = join(dir, "home");
     delete process.env.MAW_CONFIG_DIR;
     expect(profilesDir()).toBe(join(dir, "home", "config", "profiles"));
+
+    delete process.env.MAW_HOME;
+    process.env.XDG_CONFIG_HOME = join(dir, "xdg-config");
+    expect(profilesDir()).toBe(join(dir, "xdg-config", "maw", "profiles"));
   });
 
   test("loadProfile seeds all, normalizes missing names, and skips invalid/corrupt profiles", () => {

@@ -17,11 +17,15 @@
 import { spawnSync } from "child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
-import { homedir, tmpdir } from "os";
+import { tmpdir } from "os";
+import { mawDataPath } from "../../../core/xdg";
 
 const REPO = "Soul-Brews-Studio/maw-ui";
-const DIST_DIR = join(homedir(), ".maw", "ui", "dist");
 const VERSION_MARKER = ".maw-ui-version";
+
+export function uiDistDir(): string {
+  return mawDataPath("ui", "dist");
+}
 
 /**
  * Resolve the installed maw-ui version by checking, in order:
@@ -76,19 +80,20 @@ export async function cmdUiInstall(version?: string): Promise<void> {
     const tarPath = join(tmpDir, "maw-ui-dist.tar.gz");
 
     // Wipe + recreate target so no stale files remain
-    rmSync(DIST_DIR, { recursive: true, force: true });
-    mkdirSync(DIST_DIR, { recursive: true });
+    const distDir = uiDistDir();
+    rmSync(distDir, { recursive: true, force: true });
+    mkdirSync(distDir, { recursive: true });
 
-    const ext = spawnSync("tar", ["-xzf", tarPath, "-C", DIST_DIR, "--strip-components=1"], {
+    const ext = spawnSync("tar", ["-xzf", tarPath, "-C", distDir, "--strip-components=1"], {
       encoding: "utf-8",
     });
     if (ext.status !== 0) {
       throw new Error(`tar extraction failed:\n${ext.stderr}`);
     }
 
-    const files = readdirSync(DIST_DIR);
+    const files = readdirSync(distDir);
     if (files.length === 0) {
-      throw new Error(`no files extracted to ${DIST_DIR}`);
+      throw new Error(`no files extracted to ${distDir}`);
     }
 
     // Write a version marker so `maw ui status` can report the real version.
@@ -99,9 +104,9 @@ export async function cmdUiInstall(version?: string): Promise<void> {
       const tagLookup = spawnSync("gh", ["release", "view", "-R", REPO, "--json", "tagName", "-q", ".tagName"], { encoding: "utf-8" });
       if (tagLookup.status === 0) markerRef = tagLookup.stdout.trim();
     }
-    if (markerRef) writeFileSync(join(DIST_DIR, VERSION_MARKER), markerRef + "\n");
+    if (markerRef) writeFileSync(join(distDir, VERSION_MARKER), markerRef + "\n");
 
-    console.log(`✓ maw-ui ${displayRef} installed → ${DIST_DIR} (${files.length} top-level entries)`);
+    console.log(`✓ maw-ui ${displayRef} installed → ${distDir} (${files.length} top-level entries)`);
     console.log(`  → restart maw server to serve the new UI: pm2 restart maw OR maw serve`);
   } finally {
     rmSync(tmpDir, { recursive: true, force: true });
@@ -109,15 +114,16 @@ export async function cmdUiInstall(version?: string): Promise<void> {
 }
 
 export async function cmdUiStatus(): Promise<void> {
-  if (!existsSync(DIST_DIR)) {
+  const distDir = uiDistDir();
+  if (!existsSync(distDir)) {
     console.log(`✗ maw-ui not installed`);
     console.log(`  → run: maw ui install`);
     return;
   }
 
-  const files = readdirSync(DIST_DIR);
-  const version = resolveInstalledVersion(DIST_DIR);
+  const files = readdirSync(distDir);
+  const version = resolveInstalledVersion(distDir);
   const versionStr = version ? (version.startsWith("v") ? version : `v${version}`) : "(version unknown)";
-  console.log(`✓ maw-ui ${versionStr} at ${DIST_DIR}`);
+  console.log(`✓ maw-ui ${versionStr} at ${distDir}`);
   console.log(`  ${files.length} top-level entries`);
 }

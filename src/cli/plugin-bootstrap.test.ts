@@ -368,14 +368,17 @@ describe("runBootstrap — #817 idempotent bundled-plugin symlinks", () => {
   });
 
   it("pluginSources URL-fetch path is gated behind wasEmpty (only logs on first install)", async () => {
-    // The `[maw] bootstrapped N plugins` console.log is inside the `wasEmpty`
+    // The `[maw] bootstrapped N plugins` info log is inside the `wasEmpty`
     // branch alongside the URL-fetch logic — its presence/absence is a
     // proxy for whether the URL-fetch path executed.
     makeBundledPlugin("alpha");
 
-    const originalLog = console.log;
+    const originalWrite = process.stderr.write;
     const logs: string[] = [];
-    console.log = (...args: unknown[]) => { logs.push(args.map(String).join(" ")); };
+    process.stderr.write = ((chunk: string | Uint8Array, ...args: unknown[]) => {
+      logs.push(String(chunk));
+      return originalWrite.call(process.stderr, chunk as string, ...(args as []));
+    }) as typeof process.stderr.write;
 
     try {
       // First install: pluginDir empty → wasEmpty branch should run.
@@ -395,7 +398,7 @@ describe("runBootstrap — #817 idempotent bundled-plugin symlinks", () => {
       expect(existsSync(join(pluginDir, "shellenv"))).toBe(true);
       expect(lstatSync(join(pluginDir, "shellenv")).isSymbolicLink()).toBe(true);
     } finally {
-      console.log = originalLog;
+      process.stderr.write = originalWrite;
     }
   });
 });

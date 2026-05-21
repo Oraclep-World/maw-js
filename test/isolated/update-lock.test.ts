@@ -2,15 +2,15 @@
  * #551 — withUpdateLock acquisition + release semantics.
  *
  * Contract under test (src/cli/update-lock.ts):
- *   - Acquires ~/.maw/update.lock via openSync(..., "wx") (O_EXCL).
+ *   - Acquires the active XDG state update.lock via openSync(..., "wx") (O_EXCL).
  *   - On EEXIST, polls every 500ms up to 60s.
  *   - After 60s, unlinks stale lock + takes over with a warning.
  *   - Non-EEXIST errors propagate.
- *   - finally: closeSync(fd) + unlinkSync(LOCK_PATH) even when fn throws.
+ *   - finally: closeSync(fd) + unlinkSync(lockPath) even when fn throws.
  *
  * Isolation: mock.module("fs", ...) so every fs op inside update-lock.ts
  * hits our stubs. We capture calls to assert order. Pass-through for dirs
- * (existsSync/mkdirSync) since update-lock creates ~/.maw if missing.
+ * (existsSync/mkdirSync) since update-lock creates the state dir if missing.
  *
  * mock.module is process-global — keep all state inside this file and
  * reset between tests via beforeEach.
@@ -354,5 +354,31 @@ describe("withUpdateLock — acquisition + release (#551)", () => {
 
     expect(exits).toEqual([143]);
     expect(calls.some((c) => c.fn === "closeSync" && c.args[0] === 1431)).toBe(true);
+  });
+
+  test("case 10 — resolves MAW_STATE_DIR at lock acquisition time", async () => {
+    openPlan = [2024];
+    const mod = await import("../../src/cli/update-lock");
+    const originalHome = process.env.MAW_HOME;
+    const originalStateDir = process.env.MAW_STATE_DIR;
+    const stateDir = `/tmp/maw-update-lock-xdg-test-${process.pid}`;
+    const expectedLock = `${stateDir}/update.lock`;
+
+    delete process.env.MAW_HOME;
+    process.env.MAW_STATE_DIR = stateDir;
+    try {
+      expect(mod.updateLockPath()).toBe(expectedLock);
+
+      await mod.withUpdateLock(async () => "xdg-state");
+    } finally {
+      if (originalHome === undefined) delete process.env.MAW_HOME;
+      else process.env.MAW_HOME = originalHome;
+      if (originalStateDir === undefined) delete process.env.MAW_STATE_DIR;
+      else process.env.MAW_STATE_DIR = originalStateDir;
+    }
+
+    expect(calls.some((c) => c.fn === "existsSync" && c.args[0] === stateDir)).toBe(true);
+    expect(calls.some((c) => c.fn === "openSync" && c.args[0] === expectedLock && c.args[1] === "wx")).toBe(true);
+    expect(calls.some((c) => c.fn === "unlinkSync" && c.args[0] === expectedLock)).toBe(true);
   });
 });

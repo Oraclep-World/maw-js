@@ -5,13 +5,21 @@ import { tmpdir } from "os";
 import { dirname, join } from "path";
 
 const CONFIG_DIR = mkdtempSync(join(tmpdir(), "maw-lib-oracle-members-"));
+const STATE_DIR = mkdtempSync(join(tmpdir(), "maw-lib-oracle-members-state-"));
+const ORIGINAL_MAW_CONFIG_DIR = process.env.MAW_CONFIG_DIR;
+const ORIGINAL_MAW_STATE_DIR = process.env.MAW_STATE_DIR;
 process.env.MAW_CONFIG_DIR = CONFIG_DIR;
+process.env.MAW_STATE_DIR = STATE_DIR;
 
 const { filterMembers, getOracleMembers, loadOracleRegistry } = await import(
   "../../src/lib/oracle-members.ts?lib-oracle-members-coverage"
 );
 
 function registryPath(team: string): string {
+  return join(STATE_DIR, "teams", team, "oracle-members.json");
+}
+
+function legacyRegistryPath(team: string): string {
   return join(CONFIG_DIR, "teams", team, "oracle-members.json");
 }
 
@@ -21,13 +29,24 @@ function writeRegistry(team: string, body: unknown): void {
   writeFileSync(path, typeof body === "string" ? body : JSON.stringify(body, null, 2));
 }
 
+function writeLegacyRegistry(team: string, body: unknown): void {
+  const path = legacyRegistryPath(team);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, typeof body === "string" ? body : JSON.stringify(body, null, 2));
+}
+
 beforeEach(() => {
   rmSync(join(CONFIG_DIR, "teams"), { recursive: true, force: true });
+  rmSync(join(STATE_DIR, "teams"), { recursive: true, force: true });
 });
 
 afterAll(() => {
   rmSync(CONFIG_DIR, { recursive: true, force: true });
-  delete process.env.MAW_CONFIG_DIR;
+  rmSync(STATE_DIR, { recursive: true, force: true });
+  if (ORIGINAL_MAW_CONFIG_DIR === undefined) delete process.env.MAW_CONFIG_DIR;
+  else process.env.MAW_CONFIG_DIR = ORIGINAL_MAW_CONFIG_DIR;
+  if (ORIGINAL_MAW_STATE_DIR === undefined) delete process.env.MAW_STATE_DIR;
+  else process.env.MAW_STATE_DIR = ORIGINAL_MAW_STATE_DIR;
 });
 
 describe("lib oracle-members coverage", () => {
@@ -79,5 +98,18 @@ describe("lib oracle-members coverage", () => {
     });
 
     expect(getOracleMembers("inclusive", "lead")).toEqual(["lead", "reviewer"]);
+  });
+
+  test("legacy config registries remain readable when no state registry exists", () => {
+    writeLegacyRegistry("legacy", {
+      name: "legacy",
+      createdAt: "2026-05-20T00:00:00.000Z",
+      members: [
+        { oracle: "legacy-lead", role: "lead", addedAt: "2026-05-20T00:00:00.000Z" },
+      ],
+    });
+
+    expect(loadOracleRegistry("legacy")?.name).toBe("legacy");
+    expect(getOracleMembers("legacy")).toEqual(["legacy-lead"]);
   });
 });

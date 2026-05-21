@@ -118,15 +118,20 @@ function createHarness(options: {
 }
 
 let oldAgentName: string | undefined;
+let oldMawDataDir: string | undefined;
 
 beforeEach(() => {
   oldAgentName = process.env.CLAUDE_AGENT_NAME;
+  oldMawDataDir = process.env.MAW_DATA_DIR;
   process.env.CLAUDE_AGENT_NAME = "codex-agent";
+  process.env.MAW_DATA_DIR = "/xdg-data";
 });
 
 afterEach(() => {
   if (oldAgentName === undefined) delete process.env.CLAUDE_AGENT_NAME;
   else process.env.CLAUDE_AGENT_NAME = oldAgentName;
+  if (oldMawDataDir === undefined) delete process.env.MAW_DATA_DIR;
+  else process.env.MAW_DATA_DIR = oldMawDataDir;
 });
 
 describe("cmdDone", () => {
@@ -141,8 +146,8 @@ describe("cmdDone", () => {
     expect(h.logs.join("\n")).toContain("would send /rrr to work:tile-1");
     expect(h.logs.join("\n")).toContain("would git add + commit + push");
 
-    const inboxPath = "/home/tester/.oracle/inbox/leadmain.jsonl";
-    expect(h.dirs).toContain("/home/tester/.oracle/inbox");
+    const inboxPath = "/xdg-data/inbox/leadmain.jsonl";
+    expect(h.dirs).toContain("/xdg-data/inbox");
     const signal = JSON.parse(h.files.get(inboxPath)!.trim());
     expect(signal).toEqual({
       ts: "2026-05-17T01:02:03.004Z",
@@ -241,7 +246,7 @@ describe("done inbox and autosave helpers", () => {
     expect(failing.errors.join("\n")).toContain("inbox signal failed");
   });
 
-  test("signalParentInbox can use the default clock when tests inject only filesystem paths", () => {
+  test("signalParentInbox uses XDG data inbox even when tests inject only filesystem paths", () => {
     const memory = createMemoryFs();
     signalParentInbox("tile-1", "work", [
       { name: "work", windows: [{ index: 0, name: "lead", active: true }] },
@@ -251,9 +256,38 @@ describe("done inbox and autosave helpers", () => {
       logger: { log() {}, error() {} },
     });
 
-    const signal = JSON.parse(memory.files.get("/home/default-clock/.oracle/inbox/lead.jsonl")!.trim());
+    const signal = JSON.parse(memory.files.get("/xdg-data/inbox/lead.jsonl")!.trim());
     expect(Number.isNaN(Date.parse(signal.ts))).toBe(false);
     expect(signal.msg).toBe("worktree tile-1 completed");
+  });
+
+  test("signalParentInbox writes to XDG data inbox when no home override is injected", () => {
+    const memory = createMemoryFs();
+
+    signalParentInbox("tile-1", "work", [
+      { name: "work", windows: [{ index: 0, name: "lead", active: true }] },
+    ], {
+      fs: memory.fs,
+      now: () => new Date("2026-05-17T02:03:04.005Z"),
+      logger: { log() {}, error() {} },
+    });
+
+    const signal = JSON.parse(memory.files.get("/xdg-data/inbox/lead.jsonl")!.trim());
+    expect(signal).toMatchObject({ from: "codex-agent", type: "done", msg: "worktree tile-1 completed" });
+  });
+
+  test("signalParentInbox keeps an explicit inboxDir override for harnesses", () => {
+    const memory = createMemoryFs();
+
+    signalParentInbox("tile-1", "work", [
+      { name: "work", windows: [{ index: 0, name: "lead", active: true }] },
+    ], {
+      fs: memory.fs,
+      inboxDir: "/tmp/custom-inbox",
+      logger: { log() {}, error() {} },
+    });
+
+    expect(memory.files.has("/tmp/custom-inbox/lead.jsonl")).toBe(true);
   });
 
   test("autoSave sends /rrr, waits, and commits/pushes when pane cwd is known", async () => {
@@ -336,6 +370,31 @@ describe("done worktree cleanup helpers", () => {
       "git -C '/repos/github.com/Soul-Brews-Studio/maw-js' worktree remove '/repos/github.com/Soul-Brews-Studio/maw-js.wt-tile-1' --force",
       "git -C '/repos/github.com/Soul-Brews-Studio/maw-js' worktree prune",
     ]);
+  });
+
+  test("removeWorktreeViaConfig reads state fleet configs before duplicate legacy configs", async () => {
+    const h = createHarness({
+      files: {
+        "/state/fleet/team.json": JSON.stringify({
+          windows: [{ name: "tile-1", repo: "StateOrg/state-repo.wt-tile-1" }],
+        }),
+        "/fleet/team.json": JSON.stringify({
+          windows: [{ name: "tile-1", repo: "LegacyOrg/legacy-repo.wt-tile-1" }],
+        }),
+      },
+      hostExec: (command) => {
+        if (command.includes("rev-parse")) return "main\n";
+        return "";
+      },
+    });
+    h.deps.fleetDirs = ["/state/fleet", "/fleet"];
+
+    await expect(removeWorktreeViaConfig("tile-1", "/repos/github.com", h.deps)).resolves.toBe(true);
+
+    expect(h.commands).toContain(
+      "git -C '/repos/github.com/StateOrg/state-repo.wt-tile-1' rev-parse --abbrev-ref HEAD",
+    );
+    expect(h.commands.join("\n")).not.toContain("LegacyOrg/legacy-repo");
   });
 
   test("removeWorktreeViaConfig returns false for non-worktrees, remove failures, and fleet scan errors", async () => {
@@ -452,5 +511,31 @@ describe("done worktree cleanup helpers", () => {
 
     const missing = createHarness({ fsFailReaddir: true });
     expect(removeFromFleetConfig("tile-1", missing.deps)).toBe(false);
+  });
+
+  test("removeFromFleetConfig rewrites the state config before duplicate legacy files", () => {
+    const h = createHarness({
+      files: {
+        "/state/fleet/team.json": JSON.stringify({
+          windows: [
+            { name: "tile-1", repo: "state/repo.wt-tile-1" },
+            { name: "lead", repo: "state/repo" },
+          ],
+        }),
+        "/fleet/team.json": JSON.stringify({
+          windows: [{ name: "tile-1", repo: "legacy/repo.wt-tile-1" }],
+        }),
+      },
+    });
+    h.deps.fleetDirs = ["/state/fleet", "/fleet"];
+
+    expect(removeFromFleetConfig("tile-1", h.deps)).toBe(true);
+
+    expect(JSON.parse(h.files.get("/state/fleet/team.json")!)).toEqual({
+      windows: [{ name: "lead", repo: "state/repo" }],
+    });
+    expect(JSON.parse(h.files.get("/fleet/team.json")!)).toEqual({
+      windows: [{ name: "tile-1", repo: "legacy/repo.wt-tile-1" }],
+    });
   });
 });

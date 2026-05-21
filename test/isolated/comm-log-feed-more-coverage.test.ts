@@ -49,8 +49,8 @@ describe("comm log feed more coverage", () => {
 
     await mod.logMessage("oracle", "white:target", long, "direct");
 
-    expect(mkdirCalls[0].path).toBe("/home/tester/.oracle");
-    expect(appendCalls[0].path).toBe("/home/tester/.oracle/maw-log.jsonl");
+    expect(mkdirCalls[0].path).toBe("/home/tester/.maw");
+    expect(appendCalls[0].path).toBe("/home/tester/.maw/maw-log.jsonl");
     const parsed = JSON.parse(appendCalls[0].data.trim());
     expect(parsed.from).toBe("m5:oracle");
     expect(parsed.to).toBe("white:target");

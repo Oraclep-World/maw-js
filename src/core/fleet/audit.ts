@@ -3,7 +3,9 @@ import { appendFileSync, readFileSync, existsSync, mkdirSync } from "fs";
 import os from "os";
 import { mawStatePath } from "../xdg";
 
-const AUDIT_FILE = mawStatePath("audit.jsonl");
+export function auditFilePath(): string {
+  return mawStatePath("audit.jsonl");
+}
 
 export interface AuditEntry {
   ts: string;
@@ -25,8 +27,9 @@ export function logAudit(cmd: string, args: string[], result?: string): void {
   };
   if (result !== undefined) (entry as any).result = result;
   try {
-    mkdirSync(dirname(AUDIT_FILE), { recursive: true });
-    appendFileSync(AUDIT_FILE, JSON.stringify(entry) + "\n", "utf-8");
+    const filePath = auditFilePath();
+    mkdirSync(dirname(filePath), { recursive: true });
+    appendFileSync(filePath, JSON.stringify(entry) + "\n", "utf-8");
   } catch {
     // Silent fail — audit should never break the CLI
   }
@@ -51,10 +54,10 @@ export interface AnomalyEntry {
 export function logAnomaly(
   event: string,
   data: { input?: Record<string, unknown>; context?: Record<string, unknown> },
-  filePath = AUDIT_FILE,
+  filePath = auditFilePath(),
 ): void {
   try {
-    if (filePath === AUDIT_FILE) mkdirSync(dirname(filePath), { recursive: true });
+    if (filePath === auditFilePath()) mkdirSync(dirname(filePath), { recursive: true });
     const entry: AnomalyEntry = {
       ts: new Date().toISOString(),
       kind: "anomaly",
@@ -71,7 +74,8 @@ export function logAnomaly(
 }
 
 export function readAudit(count = 20): string[] {
-  if (!existsSync(AUDIT_FILE)) return [];
-  const lines = readFileSync(AUDIT_FILE, "utf-8").trim().split("\n").filter(Boolean);
+  const filePath = auditFilePath();
+  if (!existsSync(filePath)) return [];
+  const lines = readFileSync(filePath, "utf-8").trim().split("\n").filter(Boolean);
   return lines.slice(-count);
 }

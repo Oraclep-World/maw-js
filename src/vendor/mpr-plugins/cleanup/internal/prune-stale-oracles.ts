@@ -36,10 +36,10 @@
  * without touching the operator's real registry.
  */
 
-import { readFileSync, writeFileSync, existsSync, statSync } from "fs";
-import { join } from "path";
-import { homedir } from "os";
+import { readFileSync, writeFileSync, existsSync, statSync, mkdirSync } from "fs";
+import { dirname, join } from "path";
 import { loadManifest, type OracleManifestEntry } from "maw-js/lib/oracle-manifest";
+import { mawCachePath, mawConfigPath } from "../../../../core/xdg";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -128,7 +128,6 @@ export interface CmdPruneStaleOpts {
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const ORACLES_JSON_PATH = join(homedir(), ".config", "maw", "oracles.json");
 const DAY_MS = 86_400_000;
 const PLACEHOLDER_KB_MIN = 124;
 const PLACEHOLDER_KB_MAX = 128;
@@ -138,12 +137,20 @@ const CONCURRENCY = 8;
 
 // ─── Cache I/O (preserves unknown top-level keys) ────────────────────────────
 
-interface OraclesCacheFile {
+export interface OraclesCacheFile {
   raw: Record<string, unknown>;
   entries: OracleEntryLite[];
 }
 
-export function readOraclesCache(file: string = ORACLES_JSON_PATH): OraclesCacheFile | null {
+export function oraclesCachePath(): string {
+  return mawCachePath("oracles.json");
+}
+
+export function legacyOraclesCachePath(): string {
+  return mawConfigPath("oracles.json");
+}
+
+function readOraclesCacheFile(file: string): OraclesCacheFile | null {
   try {
     if (!existsSync(file)) return null;
     const raw = JSON.parse(readFileSync(file, "utf-8"));
@@ -157,8 +164,14 @@ export function readOraclesCache(file: string = ORACLES_JSON_PATH): OraclesCache
   }
 }
 
-export function writeOraclesCache(cache: OraclesCacheFile, file: string = ORACLES_JSON_PATH): void {
+export function readOraclesCache(file?: string): OraclesCacheFile | null {
+  if (file) return readOraclesCacheFile(file);
+  return readOraclesCacheFile(oraclesCachePath()) ?? readOraclesCacheFile(legacyOraclesCachePath());
+}
+
+export function writeOraclesCache(cache: OraclesCacheFile, file: string = oraclesCachePath()): void {
   const merged = { ...cache.raw, oracles: cache.entries };
+  mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, JSON.stringify(merged, null, 2) + "\n", "utf-8");
 }
 
@@ -412,8 +425,8 @@ function renderBucket(
 
 export async function cmdPruneStale(opts: CmdPruneStaleOpts = {}): Promise<void> {
   const log = (s: string) => console.log(s);
-  const file = opts.cacheFile ?? ORACLES_JSON_PATH;
-  const cache = readOraclesCache(file);
+  const file = opts.cacheFile ?? oraclesCachePath();
+  const cache = opts.cacheFile ? readOraclesCache(file) : readOraclesCache();
   if (!cache) {
     log(`\x1b[33mNo oracles.json found at ${file} — nothing to prune.\x1b[0m`);
     return;

@@ -6,6 +6,7 @@ import { join } from "path";
 import {
   mergeFleetIntoAgents,
   readFleetDir,
+  readFleetDirs,
   loadFleetAgents,
 } from "../src/config/fleet-merge";
 
@@ -116,6 +117,55 @@ describe("readFleetDir (#736 Phase 1.1)", () => {
     const sessions = readFleetDir(dir);
     const names = sessions.flatMap(s => (s.windows || []).map(w => w.name));
     expect(names).toEqual(["good-oracle"]);
+  });
+});
+
+describe("readFleetDirs XDG fallback (#1818/#1819)", () => {
+  let stateDir: string;
+  let legacyDir: string;
+
+  beforeEach(() => {
+    stateDir = mkdtempSync(join(tmpdir(), "maw-fleet-merge-state-"));
+    legacyDir = mkdtempSync(join(tmpdir(), "maw-fleet-merge-legacy-"));
+  });
+
+  afterEach(() => {
+    try { rmSync(stateDir, { recursive: true, force: true }); } catch { /* ignore */ }
+    try { rmSync(legacyDir, { recursive: true, force: true }); } catch { /* ignore */ }
+  });
+
+  test("reads state fleet first and falls back to legacy fleet entries", () => {
+    writeFileSync(join(legacyDir, "01-alpha.json"), JSON.stringify({
+      windows: [{ name: "legacy-alpha-oracle" }],
+    }));
+    writeFileSync(join(legacyDir, "02-beta.json"), JSON.stringify({
+      windows: [{ name: "legacy-beta-oracle" }],
+    }));
+    writeFileSync(join(stateDir, "01-alpha.json"), JSON.stringify({
+      windows: [{ name: "state-alpha-oracle" }],
+    }));
+
+    const agents = mergeFleetIntoAgents({}, readFleetDirs([stateDir, legacyDir]), "m5");
+    expect(agents).toEqual({
+      "state-alpha-oracle": "m5",
+      "legacy-beta-oracle": "m5",
+    });
+  });
+
+  test("malformed state fleet files do not shadow valid legacy fallbacks", () => {
+    writeFileSync(join(legacyDir, "01-alpha.json"), JSON.stringify({
+      windows: [{ name: "legacy-alpha-oracle" }],
+    }));
+    writeFileSync(join(stateDir, "01-alpha.json"), "{not json");
+    writeFileSync(join(stateDir, "02-beta.json"), JSON.stringify({
+      windows: [{ name: "state-beta-oracle" }],
+    }));
+
+    const agents = mergeFleetIntoAgents({}, readFleetDirs([stateDir, legacyDir]), "m5");
+    expect(agents).toEqual({
+      "legacy-alpha-oracle": "m5",
+      "state-beta-oracle": "m5",
+    });
   });
 });
 

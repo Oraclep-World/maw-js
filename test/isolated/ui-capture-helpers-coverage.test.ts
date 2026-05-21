@@ -34,6 +34,7 @@ let tempDirs: string[] = [];
 
 const originalHome = process.env.HOME;
 const originalMawUiSrc = process.env.MAW_UI_SRC;
+const originalMawDataDir = process.env.MAW_DATA_DIR;
 const originalLog = console.log;
 const originalError = console.error;
 
@@ -94,7 +95,7 @@ function makeTempDir(prefix: string) {
   return dir;
 }
 
-function restoreEnv(name: "HOME" | "MAW_UI_SRC", value: string | undefined) {
+function restoreEnv(name: "HOME" | "MAW_UI_SRC" | "MAW_DATA_DIR", value: string | undefined) {
   if (value === undefined) delete process.env[name];
   else process.env[name] = value;
 }
@@ -122,6 +123,7 @@ beforeEach(() => {
   tempDirs = [];
   restoreEnv("HOME", originalHome);
   restoreEnv("MAW_UI_SRC", originalMawUiSrc);
+  delete process.env.MAW_DATA_DIR;
   console.log = (...args: any[]) => logs.push(args.map(String).join(" "));
   console.error = (...args: any[]) => errors.push(args.map(String).join(" "));
 });
@@ -131,6 +133,7 @@ afterEach(() => {
   console.error = originalError;
   restoreEnv("HOME", originalHome);
   restoreEnv("MAW_UI_SRC", originalMawUiSrc);
+  restoreEnv("MAW_DATA_DIR", originalMawDataDir);
   for (const dir of tempDirs) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -173,6 +176,25 @@ describe("ui impl helpers coverage", () => {
     const distDir = join(home, ".maw", "ui", "dist");
     mkdirSync(distDir, { recursive: true });
     writeFileSync(join(distDir, "index.html"), "<!doctype html>", "utf-8");
+
+    expect(isUiDistInstalled()).toBe(true);
+  });
+
+  test("isUiDistInstalled follows MAW_DATA_DIR before the legacy home fallback", () => {
+    const home = makeTempDir("maw-ui-legacy-home-");
+    const dataDir = makeTempDir("maw-ui-data-");
+    mockHomeDir = home;
+    process.env.MAW_DATA_DIR = dataDir;
+
+    const legacyDistDir = join(home, ".maw", "ui", "dist");
+    mkdirSync(legacyDistDir, { recursive: true });
+    writeFileSync(join(legacyDistDir, "index.html"), "<!doctype html>", "utf-8");
+
+    expect(isUiDistInstalled()).toBe(false);
+
+    const xdgDistDir = join(dataDir, "ui", "dist");
+    mkdirSync(xdgDistDir, { recursive: true });
+    writeFileSync(join(xdgDistDir, "index.html"), "<!doctype html>", "utf-8");
 
     expect(isUiDistInstalled()).toBe(true);
   });

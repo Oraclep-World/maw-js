@@ -14,7 +14,8 @@
 import { existsSync } from "fs";
 import { join } from "path";
 import { ghqFind } from "maw-js/core/ghq";
-import { listSessions, FLEET_DIR } from "maw-js/sdk";
+import { listSessions } from "maw-js/sdk";
+import { loadFleetEntries, type FleetEntry } from "maw-js/commands/shared/fleet-load";
 import { loadConfig } from "maw-js/config";
 import { resolveSessionTarget } from "maw-js/core/matcher/resolve-target";
 import { UserError } from "maw-js/core/util/user-error";
@@ -33,6 +34,28 @@ interface LocateResult {
   fleetConfigPath: string | null;
   federationNode: string | null;
   inAgentsConfig: boolean;
+}
+
+function fleetEntryMatches(entry: FleetEntry, names: Set<string>): boolean {
+  const fileBase = entry.file.replace(/\.json$/, "");
+  const sessionName = entry.session?.name;
+  const entryNames = [fileBase, entry.groupName, sessionName].filter(Boolean) as string[];
+  return entryNames.some(name => names.has(name));
+}
+
+function findFleetConfigPath(oracle: string, sessionName: string | null): string | null {
+  const names = new Set([oracle, `${oracle}-oracle`]);
+  if (sessionName) names.add(sessionName);
+
+  try {
+    for (const entry of loadFleetEntries()) {
+      if (fleetEntryMatches(entry, names)) return entry.path ?? null;
+    }
+  } catch {
+    /* fleet configs are diagnostic-only for locate */
+  }
+
+  return null;
 }
 
 async function gatherInfo(oracle: string): Promise<LocateResult> {
@@ -58,22 +81,9 @@ async function gatherInfo(oracle: string): Promise<LocateResult> {
     /* tmux not running — leave session null */
   }
 
-  // Fleet config — check for a file matching this oracle
-  let fleetConfigPath: string | null = null;
-  if (sessionName) {
-    const candidate = join(FLEET_DIR, `${sessionName}.json`);
-    if (existsSync(candidate)) fleetConfigPath = candidate;
-  }
-  if (!fleetConfigPath) {
-    // Fallback: try `<oracle>-oracle.json` or `<oracle>.json`
-    for (const name of [`${oracle}-oracle`, oracle]) {
-      const candidate = join(FLEET_DIR, `${name}.json`);
-      if (existsSync(candidate)) {
-        fleetConfigPath = candidate;
-        break;
-      }
-    }
-  }
+  // Fleet config — use the migrated fleet loader so XDG state entries
+  // shadow legacy entries and report the exact source path.
+  const fleetConfigPath = findFleetConfigPath(oracle, sessionName);
 
   // Federation — config.agents map + node
   const config = loadConfig();

@@ -1,6 +1,7 @@
 import { homedir, hostname } from "os";
-import { existsSync, readdirSync } from "fs";
-import { CONFIG_FILE, FLEET_DIR } from "maw-js/core/paths";
+import { existsSync } from "fs";
+import { CONFIG_FILE } from "maw-js/core/paths";
+import { fleetDirForWrite, loadFleetEntries } from "maw-js/commands/shared/fleet-load";
 import { runPromptLoop, ttyAsk, type AskFn } from "./prompts";
 import { parseNonInteractive } from "./non-interactive";
 import {
@@ -148,9 +149,10 @@ export async function cmdInit(opts: CmdInitOpts): Promise<CmdInitResult> {
   } catch (e: any) {
     write(`${GRAY}warning: plugins.lock bootstrap skipped — ${e?.message ?? String(e)}${RESET}`);
   }
-  if (existsSync(FLEET_DIR)) {
-    const fleetCount = readdirSync(FLEET_DIR).filter(f => f.endsWith(".json")).length;
-    write(`${GREEN}✓${RESET} Fleet dir ready: ${FLEET_DIR} ${GRAY}(${fleetCount} entr${fleetCount === 1 ? "y" : "ies"})${RESET}`);
+  const fleetDir = fleetDirForWrite();
+  const fleetCount = loadFleetEntries().length;
+  if (existsSync(fleetDir) || fleetCount > 0) {
+    write(`${GREEN}✓${RESET} Fleet dir ready: ${fleetDir} ${GRAY}(${fleetCount} entr${fleetCount === 1 ? "y" : "ies"})${RESET}`);
   }
 
   if (federationToken) {

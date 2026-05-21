@@ -1,10 +1,10 @@
 import { hostExec, listSessions } from "../transport/ssh";
 import { tmux } from "../transport/tmux";
 import { getGhqRoot } from "../../config/ghq-root";
-import { readdirSync, readFileSync, writeFileSync } from "fs";
+import { writeFileSync } from "fs";
 import { join } from "path";
-import { FLEET_DIR } from "../paths";
 import { resolveWorktreeTarget } from "../matcher/resolve-target";
+import { loadFleetEntries } from "../../commands/shared/fleet-load";
 
 /**
  * Clean up a single worktree by path.
@@ -12,7 +12,6 @@ import { resolveWorktreeTarget } from "../matcher/resolve-target";
  */
 export async function cleanupWorktree(wtPath: string): Promise<string[]> {
   const reposRoot = join(getGhqRoot(), "github.com");
-  const fleetDir = FLEET_DIR;
   const log: string[] = [];
 
   const dirName = wtPath.split("/").pop()!;
@@ -86,17 +85,17 @@ export async function cleanupWorktree(wtPath: string): Promise<string[]> {
 
   // 4. Remove from fleet config
   try {
-    for (const file of readdirSync(fleetDir).filter(f => f.endsWith(".json"))) {
-      const filePath = join(fleetDir, file);
-      const cfg = JSON.parse(readFileSync(filePath, "utf-8"));
+    for (const entry of loadFleetEntries()) {
+      if (!entry.path) continue;
+      const cfg = { ...entry.session };
       const before = cfg.windows?.length || 0;
       cfg.windows = (cfg.windows || []).filter((w: any) => w.repo !== repo);
       if (cfg.windows.length < before) {
-        writeFileSync(filePath, JSON.stringify(cfg, null, 2) + "\n");
-        log.push(`removed from ${file}`);
+        writeFileSync(entry.path, JSON.stringify(cfg, null, 2) + "\n");
+        log.push(`removed from ${entry.file}`);
       }
     }
-  } catch { /* fleet dir may not exist */ }
+  } catch { /* fleet dir may not exist or contain invalid json */ }
 
   return log;
 }

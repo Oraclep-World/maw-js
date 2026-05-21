@@ -5,6 +5,7 @@ const MOCK_GHQ_ROOT = "/mock/ghq";
 
 type FleetEntry = {
   file: string;
+  path?: string;
   session: {
     name: string;
     windows: Array<{ name: string; repo?: string }>;
@@ -22,9 +23,11 @@ let mkdirCalls: Array<{ path: string; opts: unknown }> = [];
 let unlinkCalls: string[] = [];
 let unlinkThrowsFor = new Set<string>();
 let symlinkCalls: Array<{ src: string; dest: string }> = [];
+let writeFleetDir = MOCK_FLEET_DIR;
 
 const loadFleetEntriesMock = mock(() => fleetEntries);
 const getSessionNamesMock = mock(async () => runningSessions);
+const fleetDirForWriteMock = mock(() => writeFleetDir);
 const getGhqRootMock = mock(() => MOCK_GHQ_ROOT);
 const tmuxRunMock = mock(async (...args: string[]) => {
   const sessionName = args[2];
@@ -70,6 +73,7 @@ mock.module(import.meta.resolve("../../src/config/ghq-root"), () => ({
 mock.module(import.meta.resolve("../../src/commands/shared/fleet-load"), () => ({
   loadFleetEntries: loadFleetEntriesMock,
   getSessionNames: getSessionNamesMock,
+  fleetDirForWrite: fleetDirForWriteMock,
 }));
 
 const { cmdFleetSync, cmdFleetSyncConfigs } = await import(
@@ -97,6 +101,7 @@ beforeEach(() => {
   unlinkCalls = [];
   unlinkThrowsFor = new Set();
   symlinkCalls = [];
+  writeFleetDir = MOCK_FLEET_DIR;
 
   logs = [];
   errors = [];
@@ -105,6 +110,7 @@ beforeEach(() => {
 
   loadFleetEntriesMock.mockClear();
   getSessionNamesMock.mockClear();
+  fleetDirForWriteMock.mockClear();
   getGhqRootMock.mockClear();
   tmuxRunMock.mockClear();
   existsSyncMock.mockClear();
@@ -201,6 +207,32 @@ describe("fleet sync extra coverage", () => {
     expect(errors).toEqual([]);
   });
 
+  test("writes synced windows back to the XDG state fleet file supplied by the shared loader", async () => {
+    const alphaSession = {
+      name: "alpha-session",
+      windows: [{ name: "main", repo: "Soul-Brews-Studio/maw-js" }],
+    };
+    fleetEntries = [
+      { file: "alpha.json", path: "/mock/state/maw/fleet/alpha.json", session: alphaSession },
+    ];
+    writeFleetDir = "/mock/legacy/config/fleet";
+    runningSessions = ["alpha-session"];
+    tmuxRunBySession.set(
+      "alpha-session",
+      "main:/mock/ghq/github.com/Soul-Brews-Studio/maw-js\ncodex:/mock/ghq/github.com/Soul-Brews-Studio/maw-js.wt-codex",
+    );
+
+    await cmdFleetSync();
+
+    expect(writeCalls).toEqual([
+      {
+        path: "/mock/state/maw/fleet/alpha.json",
+        data: `${JSON.stringify(alphaSession, null, 2)}\n`,
+      },
+    ]);
+    expect(fleetDirForWriteMock).not.toHaveBeenCalled();
+  });
+
   test("prints all-clear and avoids writes when running windows are already registered", async () => {
     fleetEntries = [
       {
@@ -277,21 +309,23 @@ describe("fleet sync extra coverage", () => {
   test("sync configs symlinks json configs, ignores unlink misses, and reports synced count", async () => {
     repoFleetExists = true;
     repoFleetFiles = ["alpha.json", "README.md", "beta.json"];
-    unlinkThrowsFor = new Set([`${MOCK_FLEET_DIR}/alpha.json`]);
+    writeFleetDir = "/mock/state/maw/fleet";
+    unlinkThrowsFor = new Set([`${writeFleetDir}/alpha.json`]);
 
     await cmdFleetSyncConfigs();
 
-    expect(mkdirCalls).toEqual([{ path: MOCK_FLEET_DIR, opts: { recursive: true } }]);
-    expect(unlinkCalls).toEqual([`${MOCK_FLEET_DIR}/alpha.json`, `${MOCK_FLEET_DIR}/beta.json`]);
+    expect(fleetDirForWriteMock).toHaveBeenCalledTimes(1);
+    expect(mkdirCalls).toEqual([{ path: writeFleetDir, opts: { recursive: true } }]);
+    expect(unlinkCalls).toEqual([`${writeFleetDir}/alpha.json`, `${writeFleetDir}/beta.json`]);
     expect(symlinkCalls).toHaveLength(2);
     expect(symlinkCalls[0]).toEqual({
       src: expect.stringContaining("/src/fleet/alpha.json"),
-      dest: `${MOCK_FLEET_DIR}/alpha.json`,
+      dest: `${writeFleetDir}/alpha.json`,
     });
     expect(symlinkCalls[1]).toEqual({
       src: expect.stringContaining("/src/fleet/beta.json"),
-      dest: `${MOCK_FLEET_DIR}/beta.json`,
+      dest: `${writeFleetDir}/beta.json`,
     });
-    expect(logs.join("\n")).toContain(`✓ 2 fleet config(s) synced\u001b[0m → ${MOCK_FLEET_DIR}`);
+    expect(logs.join("\n")).toContain(`✓ 2 fleet config(s) synced\u001b[0m → ${writeFleetDir}`);
   });
 });

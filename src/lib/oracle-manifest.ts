@@ -8,7 +8,7 @@
  * maw-js currently has FIVE independent registries that each describe "what
  * oracles do I know about?" — each authoritative for a different facet:
  *
- *   1. fleet windows         — `<FLEET_DIR>/*.json`               (session+window per oracle)
+ *   1. fleet windows         — state-first fleet dirs             (session+window per oracle)
  *   2. config.sessions       — `Record<oracle, sessionId>`        (claude UUID per oracle)
  *   3. config.agents         — `Record<oracle, node>`             (federation routing)
  *   4. oracle registry cache — `oracles.json` cache file        (filesystem-discovered org/repo metadata)
@@ -58,8 +58,8 @@
 
 import { existsSync, readdirSync, readFileSync } from "fs";
 import { join } from "path";
-import { FLEET_DIR } from "../core/paths";
-import { mawCachePath } from "../core/xdg";
+import { fleetDirsForRead, uniqueDirs } from "../core/fleet/paths";
+import { mawCachePath, mawConfigPath } from "../core/xdg";
 import { readCache } from "../core/fleet/oracle-registry";
 import type { OracleEntry, RegistryCache } from "../core/fleet/oracle-registry";
 import { loadConfig } from "../config";
@@ -69,7 +69,7 @@ import { loadConfig } from "../config";
 /** Which registry surfaced a fact. Order matches numeric source precedence
  *  for human-readable diagnostics (`maw doctor` printout). */
 export type OracleManifestSource =
-  | "fleet"          // <FLEET_DIR>/*.json — fleet config windows
+  | "fleet"          // state-first fleet dirs — fleet config windows
   | "session"        // config.sessions — Claude session UUID per oracle
   | "agent"          // config.agents   — node mapping for federation
   | "oracles-json"   // oracles.json cache — filesystem-discovered cache
@@ -152,6 +152,12 @@ export type OracleBirthsByName = Record<string, OracleBirthInfo>;
 
 const ORACLE_BIRTHS_FILE = "oracle-births.json";
 
+function oracleBirthCandidateFiles(): string[] {
+  const primary = mawCachePath(ORACLE_BIRTHS_FILE);
+  const legacy = mawConfigPath(ORACLE_BIRTHS_FILE);
+  return primary === legacy ? [primary] : [primary, legacy];
+}
+
 function isBirthInfo(value: unknown): value is OracleBirthInfo {
   if (!value || typeof value !== "object") return false;
   const record = value as Record<string, unknown>;
@@ -170,10 +176,12 @@ function isBirthInfo(value: unknown): value is OracleBirthInfo {
  * shapes so the CLI can consume existing caches without pinning the skill layer
  * to one historical layout.
  */
-export function loadOracleBirths(file: string = mawCachePath(ORACLE_BIRTHS_FILE)): OracleBirthsByName {
-  if (!existsSync(file)) return {};
+export function loadOracleBirths(file?: string): OracleBirthsByName {
+  const candidates = file ? [file] : oracleBirthCandidateFiles();
+  const found = candidates.find((candidate) => existsSync(candidate));
+  if (!found) return {};
   try {
-    const raw = JSON.parse(readFileSync(file, "utf-8")) as Record<string, unknown>;
+    const raw = JSON.parse(readFileSync(found, "utf-8")) as Record<string, unknown>;
     const source = raw.entries && typeof raw.entries === "object" && !Array.isArray(raw.entries)
       ? raw.entries as Record<string, unknown>
       : raw;
@@ -192,23 +200,34 @@ function birthForName(births: OracleBirthsByName, name: string): OracleBirthInfo
   return births[name] ?? births[`${name}-oracle`];
 }
 
-/** Read fleet windows from FLEET_DIR. Returns `[]` on any failure. */
-export function readFleetWindows(dir: string = FLEET_DIR): FleetSessionLite[] {
-  if (!existsSync(dir)) return [];
-  let files: string[];
-  try {
-    files = readdirSync(dir).filter(
-      (f) => f.endsWith(".json") && !f.endsWith(".disabled"),
-    ).sort();
-  } catch {
-    return [];
-  }
+/** Read fleet windows from state-first fleet dirs. Returns `[]` on any failure. */
+export function readFleetWindows(dirOrDirs?: string | string[]): FleetSessionLite[] {
   const out: FleetSessionLite[] = [];
-  for (const f of files) {
+  const dirs = typeof dirOrDirs === "string"
+    ? [dirOrDirs]
+    : dirOrDirs?.length
+      ? uniqueDirs(dirOrDirs)
+      : fleetDirsForRead();
+  const seenFiles = new Set<string>();
+
+  for (const dir of dirs) {
+    if (!existsSync(dir)) continue;
+    let files: string[];
     try {
-      out.push(JSON.parse(readFileSync(join(dir, f), "utf-8")) as FleetSessionLite);
+      files = readdirSync(dir).filter(
+        (f) => f.endsWith(".json") && !f.endsWith(".disabled"),
+      ).sort();
     } catch {
-      // skip a single malformed fleet file — must not poison the manifest
+      continue;
+    }
+    for (const f of files) {
+      if (seenFiles.has(f)) continue;
+      seenFiles.add(f);
+      try {
+        out.push(JSON.parse(readFileSync(join(dir, f), "utf-8")) as FleetSessionLite);
+      } catch {
+        // skip a single malformed fleet file — must not poison the manifest
+      }
     }
   }
   return out;

@@ -1,10 +1,13 @@
 import { hostExec } from "maw-js/sdk";
 import { getGhqRoot } from "maw-js/config/ghq-root";
-import { loadFleetEntries } from "maw-js/commands/shared/fleet-load";
+import { fleetDirForWrite, loadFleetEntries, type FleetEntry } from "maw-js/commands/shared/fleet-load";
 import { cmdSoulSync } from "./internal/soul-sync-impl";
-import { FLEET_DIR } from "maw-js/sdk";
 import { join } from "path";
-import { existsSync, renameSync } from "fs";
+import { renameSync } from "fs";
+
+export function fleetConfigFilePath(entry: Pick<FleetEntry, "file" | "path">): string {
+  return entry.path ?? join(fleetDirForWrite(), entry.file);
+}
 
 /**
  * maw archive <oracle> [--dry-run]
@@ -48,7 +51,7 @@ export async function cmdArchive(oracleName: string, opts: { dryRun?: boolean } 
   }
 
   // 2. Disable fleet config
-  const fleetFile = join(FLEET_DIR, entry.file);
+  const fleetFile = fleetConfigFilePath(entry);
   const disabledFile = fleetFile + ".disabled";
   if (opts.dryRun) {
     console.log(`  \x1b[36m⬡\x1b[0m [dry-run] would disable: ${entry.file} → ${entry.file}.disabled`);

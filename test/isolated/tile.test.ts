@@ -142,7 +142,10 @@ describe("tile plugin spawn metadata", () => {
     expect(splitCommand).toContain("MAW_TILE_INDEX='\\''1'\\''");
     expect(splitCommand).toContain("MAW_TILE_TOTAL='\\''1'\\''");
     expect(splitCommand).toContain("MAW_TILE_WINDOW='\\''sess:1'\\''");
-    expect(splitCommand).toContain("; claude; exec zsh");
+    expect(splitCommand).toContain("exec zsh");
+    expect(splitCommand).not.toContain("; claude;");
+    expect(commands).toContain("tmux send-keys -t '%p1' -l 'claude'");
+    expect(commands).toContain("tmux send-keys -t '%p1' Enter");
     expect(commands).toContain("tmux set-option -p -t '%p1' @maw_tile '1'");
     expect(commands).toContain("tmux set-option -p -t '%p1' @maw_tile_parent 'sess:1.0'");
     expect(commands).toContain("tmux set-option -p -t '%p1' @maw_tile_role 'sess-tile-1'");
@@ -150,7 +153,7 @@ describe("tile plugin spawn metadata", () => {
 
 
 
-  test("starts spawned shells in --path and runs --cmd before returning to zsh", async () => {
+  test("starts spawned shells in --path and launches --cmd from startup before returning to zsh", async () => {
     await cmdTile(2, { path: "/tmp", cmd: "bun test", shell: true });
 
     const splitCommands = commands.filter(cmd => cmd.includes("tmux split-window"));
@@ -158,9 +161,11 @@ describe("tile plugin spawn metadata", () => {
     for (const splitCommand of splitCommands) {
       expect(splitCommand).toContain("/tmp");
       expect(splitCommand).toContain("|| exit $?; export");
-      expect(splitCommand).toContain("; bun test; exec zsh");
+      expect(splitCommand).toContain("exec zsh -ic");
+      expect(splitCommand).toContain("bun test");
       expect(splitCommand).toContain("MAW_TILE_PARENT='");
     }
+    expect(commands.some(cmd => cmd.includes("tmux send-keys") && cmd.includes("-l") && cmd.includes("bun test"))).toBe(false);
   });
 
 

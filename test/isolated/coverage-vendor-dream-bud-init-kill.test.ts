@@ -26,6 +26,11 @@ mock.module("maw-js/core/paths", () => ({
   FLEET_DIR: "/tmp/fleet",
 }));
 
+mock.module("maw-js/commands/shared/fleet-load", () => ({
+  fleetDirForWrite: () => "/tmp/fleet",
+  loadFleetEntries: () => [],
+}));
+
 mock.module(join(srcRoot, "src/vendor/mpr-plugins/init/prompts"), () => ({
   ttyAsk: async () => "",
   runPromptLoop: async () => ({

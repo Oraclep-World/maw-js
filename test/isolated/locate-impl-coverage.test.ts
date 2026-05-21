@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
@@ -20,6 +20,21 @@ mock.module("maw-js/sdk", () => ({
     if (listSessionsThrows) throw new Error("tmux unavailable");
     return sessions;
   },
+}));
+mock.module("maw-js/commands/shared/fleet-load", () => ({
+  loadFleetEntries: () => readdirSync(fleetDir)
+    .filter(file => file.endsWith(".json") && !file.endsWith(".disabled"))
+    .sort()
+    .map(file => {
+      const match = file.match(/^(\d+)-(.+)\.json$/);
+      return {
+        file,
+        path: join(fleetDir, file),
+        num: match ? Number.parseInt(match[1], 10) : 0,
+        groupName: match ? match[2] : file.replace(/\.json$/, ""),
+        session: JSON.parse(readFileSync(join(fleetDir, file), "utf-8") || "{}"),
+      };
+    }),
 }));
 mock.module("maw-js/config", () => ({
   loadConfig: () => config,

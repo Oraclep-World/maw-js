@@ -26,9 +26,9 @@ process.env.MAW_STATE_DIR = TEST_STATE_DIR;
 delete process.env.MAW_JWT_SECRET;
 delete process.env.MAW_HOME;
 
-// Import after env is set so AUTH_SECRET_FILE resolves to TEST_STATE_DIR.
+// Import after env is set so compatibility AUTH_SECRET_FILE resolves to TEST_STATE_DIR.
 const auth = await import("../../src/lib/auth");
-const { AUTH_SECRET_FILE, getJwtSecret, resetJwtSecretCache } = auth;
+const { AUTH_SECRET_FILE, authSecretFilePath, getJwtSecret, resetJwtSecretCache } = auth;
 const LEGACY_AUTH_SECRET_FILE = join(TEST_CONFIG_DIR, "auth-secret");
 
 afterAll(() => {
@@ -38,8 +38,7 @@ afterAll(() => {
 
 beforeEach(() => {
   // Each test starts with a clean slate: no env override, no cached secret,
-  // no on-disk file. The secret file's location is fixed per import — only
-  // its presence/contents vary.
+  // no on-disk file.
   delete process.env.MAW_JWT_SECRET;
   resetJwtSecretCache();
   if (existsSync(AUTH_SECRET_FILE)) rmSync(AUTH_SECRET_FILE, { force: true });
@@ -49,6 +48,28 @@ beforeEach(() => {
 describe("getJwtSecret() — #801 random + persisted secret", () => {
   test("AUTH_SECRET_FILE resolves under the test state dir (env wiring sanity)", () => {
     expect(AUTH_SECRET_FILE).toBe(join(TEST_STATE_DIR, "auth-secret"));
+    expect(authSecretFilePath()).toBe(AUTH_SECRET_FILE);
+  });
+
+  test("resolves MAW_STATE_DIR at secret access time", () => {
+    const dynamicState = mkdtempSync(join(tmpdir(), "maw-auth-dynamic-state-"));
+    process.env.MAW_STATE_DIR = dynamicState;
+    resetJwtSecretCache();
+    try {
+      const dynamicFile = join(dynamicState, "auth-secret");
+      expect(authSecretFilePath()).toBe(dynamicFile);
+      expect(existsSync(dynamicFile)).toBe(false);
+
+      const secret = getJwtSecret();
+
+      expect(secret).toMatch(/^[0-9a-f]{64}$/);
+      expect(readFileSync(dynamicFile, "utf-8")).toBe(secret);
+      expect(existsSync(AUTH_SECRET_FILE)).toBe(false);
+    } finally {
+      process.env.MAW_STATE_DIR = TEST_STATE_DIR;
+      resetJwtSecretCache();
+      rmSync(dynamicState, { recursive: true, force: true });
+    }
   });
 
   test("missing file → creates 64-char hex secret and persists it", () => {

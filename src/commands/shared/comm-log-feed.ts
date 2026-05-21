@@ -5,16 +5,17 @@
 
 import { loadConfig } from "../../config";
 import { appendFile, mkdir } from "fs/promises";
-import { homedir, hostname } from "os";
-import { join } from "path";
+import { hostname } from "os";
+import { dirname } from "path";
 import { buildMessageLifecycleFeedEvent, type MessageLifecycleInput } from "../../lib/message-events";
+import { mawMessageLogPath } from "../../core/xdg";
 
-/** Log message to ~/.oracle/maw-log.jsonl with normalized from/to */
+/** Log message to the XDG data-primary maw-log.jsonl with normalized from/to. */
 export async function logMessage(from: string, to: string, msg: string, route: string) {
   const config = loadConfig();
   if (!config.node) throw new Error("config.node is required — set 'node' in maw.config.json");
   const normalizedFrom = from.includes(":") ? from : `${config.node}:${from}`;
-  const logDir = join(homedir(), ".oracle");
+  const logFile = mawMessageLogPath();
   const line = JSON.stringify({
     ts: new Date().toISOString(),
     from: normalizedFrom,
@@ -23,7 +24,7 @@ export async function logMessage(from: string, to: string, msg: string, route: s
     host: hostname(),
     route,
   }) + "\n";
-  try { await mkdir(logDir, { recursive: true }); await appendFile(join(logDir, "maw-log.jsonl"), line); } catch {}
+  try { await mkdir(dirname(logFile), { recursive: true }); await appendFile(logFile, line); } catch {}
 }
 
 /** Emit feed event to server plugin pipeline (CLI → server bridge) */

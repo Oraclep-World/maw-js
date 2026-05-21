@@ -125,7 +125,7 @@ describe("src/lib/sleep next coverage", () => {
     expect(calls).toContain("literal:54-mawjs:neo-12-dev-:/");
     expect(calls).toContain("key:54-mawjs:neo-12-dev-:Enter");
     expect(calls).toContain("log:  \u001b[32m✓\u001b[0m neo-12-dev- exited gracefully");
-    expect(calls).toContain("append:/tmp/maw-sleep-lib-next-home/.oracle/maw-log.jsonl:neo-12-dev-");
+    expect(calls).toContain("append:/tmp/maw-sleep-lib-next-home/.maw/maw-log.jsonl:neo-12-dev-");
     expect(calls).not.toContain("kill:54-mawjs:neo-12-dev-");
   });
 

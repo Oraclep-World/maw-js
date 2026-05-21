@@ -7,7 +7,7 @@
   "author": "Soul-Brews-Studio",
   "cli": {
     "command": "doctor",
-    "help": "maw doctor [install] — run install-check (and future: config-check, peer-check)"
+    "help": "maw doctor [install|xdg|all] [--json] — diagnose install/config/runtime paths; use `maw doctor xdg --migrate --dry-run` to preview XDG copy-forward"
   },
   "weight": 30,
   "tier": "standard",

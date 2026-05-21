@@ -462,7 +462,7 @@ export async function runUpdate(args: string[]): Promise<void> {
           console.log(`  ⚠ SDK link skipped — local clone is ${cloneVersion}, installed ${ref}`);
         } else {
           execSync(`cd ${mawDir} && bun link`, { stdio: "pipe" });
-          const oracleDir = join(homedir(), ".oracle");
+          const oracleDir = mawDataPath("oracle-plugins");
           mkdirSync(oracleDir, { recursive: true });
           if (!existsSync(join(oracleDir, "package.json"))) {
             writeFileSync(join(oracleDir, "package.json"), '{"name":"oracle-plugins","private":true}\n');

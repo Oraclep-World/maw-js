@@ -22,8 +22,15 @@ import { mawConfigPath, mawStatePath } from "../core/xdg";
 import { info } from "../cli/verbosity";
 
 /** Path to the persisted peer key (mode 0600). */
-export const PEER_KEY_FILE = mawStatePath("peer-key");
-const LEGACY_PEER_KEY_FILE = mawConfigPath("peer-key");
+export function peerKeyFilePath(): string {
+  return mawStatePath("peer-key");
+}
+
+function legacyPeerKeyFilePath(): string {
+  return mawConfigPath("peer-key");
+}
+
+export const PEER_KEY_FILE = peerKeyFilePath();
 
 let cachedKey: string | null = null;
 
@@ -40,21 +47,23 @@ let cachedKey: string | null = null;
 export function getPeerKey(): string {
   if (process.env.MAW_PEER_KEY) return process.env.MAW_PEER_KEY;
   if (cachedKey) return cachedKey;
+  const peerKeyFile = peerKeyFilePath();
+  const legacyPeerKeyFile = legacyPeerKeyFilePath();
   try {
-    cachedKey = readFileSync(PEER_KEY_FILE, "utf-8").trim();
+    cachedKey = readFileSync(peerKeyFile, "utf-8").trim();
     if (cachedKey) return cachedKey;
   } catch {
     // file missing or unreadable — try legacy config path before generating
   }
-  if (LEGACY_PEER_KEY_FILE !== PEER_KEY_FILE) {
+  if (legacyPeerKeyFile !== peerKeyFile) {
     try {
-      const legacyKey = readFileSync(LEGACY_PEER_KEY_FILE, "utf-8").trim();
+      const legacyKey = readFileSync(legacyPeerKeyFile, "utf-8").trim();
       if (legacyKey) {
-        mkdirSync(dirname(PEER_KEY_FILE), { recursive: true });
-        writeFileSync(PEER_KEY_FILE, legacyKey, { mode: 0o600, flag: "w" });
-        try { chmodSync(PEER_KEY_FILE, 0o600); } catch { /* best-effort */ }
+        mkdirSync(dirname(peerKeyFile), { recursive: true });
+        writeFileSync(peerKeyFile, legacyKey, { mode: 0o600, flag: "w" });
+        try { chmodSync(peerKeyFile, 0o600); } catch { /* best-effort */ }
         cachedKey = legacyKey;
-        info(`[peer-key] migrated peer key → ${PEER_KEY_FILE} (mode 0600)`);
+        info(`[peer-key] migrated peer key → ${peerKeyFile} (mode 0600)`);
         return legacyKey;
       }
     } catch {
@@ -62,13 +71,13 @@ export function getPeerKey(): string {
     }
   }
   const fresh = randomBytes(32).toString("hex");
-  mkdirSync(dirname(PEER_KEY_FILE), { recursive: true });
-  writeFileSync(PEER_KEY_FILE, fresh, { mode: 0o600, flag: "w" });
+  mkdirSync(dirname(peerKeyFile), { recursive: true });
+  writeFileSync(peerKeyFile, fresh, { mode: 0o600, flag: "w" });
   // chmod is a belt-and-suspenders for filesystems where the open-time mode
   // isn't honored (umask-stripped, NFS, etc).
-  try { chmodSync(PEER_KEY_FILE, 0o600); } catch { /* best-effort */ }
+  try { chmodSync(peerKeyFile, 0o600); } catch { /* best-effort */ }
   cachedKey = fresh;
-  info(`[peer-key] generated random peer key → ${PEER_KEY_FILE} (mode 0600)`);
+  info(`[peer-key] generated random peer key → ${peerKeyFile} (mode 0600)`);
   return fresh;
 }
 

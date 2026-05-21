@@ -8,11 +8,18 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname } from "path";
 import type { RegistryCache } from "./registry-oracle-types";
-import { CACHE_FILE, LEGACY_CACHE_FILE, STALE_HOURS } from "./registry-oracle-types";
+import {
+  registryCacheFilePath,
+  legacyRegistryCacheFilePath,
+  STALE_HOURS,
+} from "./registry-oracle-types";
 
-function cacheReadPath(targetFile: string = CACHE_FILE): string | null {
-  if (existsSync(targetFile)) return targetFile;
-  if (targetFile === CACHE_FILE && existsSync(LEGACY_CACHE_FILE)) return LEGACY_CACHE_FILE;
+function cacheReadPath(targetFile?: string): string | null {
+  const cacheFile = registryCacheFilePath();
+  const legacyCacheFile = legacyRegistryCacheFilePath();
+  const readTarget = targetFile ?? cacheFile;
+  if (existsSync(readTarget)) return readTarget;
+  if (readTarget === cacheFile && existsSync(legacyCacheFile)) return legacyCacheFile;
   return null;
 }
 
@@ -49,21 +56,22 @@ export function mergeRegistry(
 
 /**
  * Write the cache, preserving any unknown top-level keys from `targetFile`
- * (or the real CACHE_FILE by default — the override exists for tests).
+ * (or the active cache path by default — the override exists for tests).
  */
-export function writeCache(cache: RegistryCache, targetFile: string = CACHE_FILE): void {
+export function writeCache(cache: RegistryCache, targetFile?: string): void {
+  const writeTarget = targetFile ?? registryCacheFilePath();
   let existing: unknown = null;
   try {
-    const existingFile = cacheReadPath(targetFile);
+    const existingFile = cacheReadPath(writeTarget);
     if (existingFile) {
       existing = JSON.parse(readFileSync(existingFile, "utf-8"));
     }
   } catch { /* malformed existing file — fall back to writing fresh */ }
 
   const merged = mergeRegistry(existing, cache);
-  mkdirSync(dirname(targetFile), { recursive: true });
+  mkdirSync(dirname(writeTarget), { recursive: true });
   // lgtm[js/file-system-race] — PRIVATE-PATH: fleet registry cache under ~/.maw/, see docs/security/file-system-race-stance.md
-  writeFileSync(targetFile, JSON.stringify(merged, null, 2) + "\n", "utf-8");
+  writeFileSync(writeTarget, JSON.stringify(merged, null, 2) + "\n", "utf-8");
 }
 
 export function isCacheStale(cache: RegistryCache | null): boolean {

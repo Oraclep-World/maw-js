@@ -2,7 +2,8 @@ import { Elysia, t } from "elysia";
 import { readdirSync, readFileSync, writeFileSync, renameSync, unlinkSync, existsSync } from "fs";
 import { join, basename } from "path";
 import { type MawConfig, loadConfig, saveConfig, configForDisplay } from "../config";
-import { FLEET_DIR as fleetDir } from "../core/paths";
+import { CONFIG_FILE } from "../core/paths";
+import { fleetDirForWrite, fleetDirsForRead, uniqueDirs } from "../core/fleet/paths";
 
 // Rate limit: max 5 attempts per IP per minute
 const pinAttempts = new Map<string, { count: number; resetAt: number }>();
@@ -20,6 +21,8 @@ export interface ConfigApiDeps {
   saveConfig?: typeof saveConfig;
   configForDisplay?: typeof configForDisplay;
   fleetDir?: string;
+  fleetDirs?: string[];
+  configFile?: string;
   rootDir?: string;
   pinAttempts?: Map<string, { count: number; resetAt: number }>;
   now?: () => number;
@@ -38,8 +41,10 @@ export function createConfigApi(deps: ConfigApiDeps = {}) {
   const load = deps.loadConfig ?? loadConfig;
   const save = deps.saveConfig ?? saveConfig;
   const displayConfig = deps.configForDisplay ?? configForDisplay;
-  const fleetRoot = deps.fleetDir ?? fleetDir;
   const rootDir = deps.rootDir ?? pathJoin(import.meta.dir, "../..");
+  const configFile = deps.configFile ?? (deps.rootDir ? pathJoin(rootDir, "maw.config.json") : CONFIG_FILE);
+  const fleetRoot = deps.fleetDir ?? (deps.rootDir ? pathJoin(rootDir, "fleet") : fleetDirForWrite());
+  const fleetReadRoots = uniqueDirs(deps.fleetDirs ?? (deps.fleetDir || deps.rootDir ? [fleetRoot] : fleetDirsForRead()));
   const attempts = deps.pinAttempts ?? pinAttempts;
   const now = deps.now ?? (() => Date.now());
   const createAuthToken = deps.createToken ?? (async () => {
@@ -49,18 +54,50 @@ export function createConfigApi(deps: ConfigApiDeps = {}) {
 
   const configApi = new Elysia();
 
+  function fleetNameFromPath(filePath: string): string | null {
+    if (!filePath.startsWith("fleet/")) return null;
+    const name = filePath.slice("fleet/".length);
+    return name && !name.includes("..") ? name : null;
+  }
+
+  function fleetReadPath(filePath: string): string {
+    const name = fleetNameFromPath(filePath);
+    if (!name) return pathJoin(rootDir, filePath);
+    for (const dir of fleetReadRoots) {
+      const candidate = pathJoin(dir, name);
+      if (exists(candidate)) return candidate;
+    }
+    return pathJoin(fleetReadRoots[0] ?? fleetRoot, name);
+  }
+
+  function configReadPath(filePath: string): string {
+    if (filePath === "maw.config.json") return configFile;
+    return fleetNameFromPath(filePath) ? fleetReadPath(filePath) : pathJoin(rootDir, filePath);
+  }
+
+  function configWritePath(filePath: string): string {
+    if (filePath === "maw.config.json") return configFile;
+    const fleetName = fleetNameFromPath(filePath);
+    return fleetName ? pathJoin(fleetRoot, fleetName) : pathJoin(rootDir, filePath);
+  }
+
   // List all config files (maw.config.json + fleet/*.json + fleet/*.json.disabled)
   configApi.get("/config-files", () => {
     const files: { name: string; path: string; enabled: boolean }[] = [
       { name: "maw.config.json", path: "maw.config.json", enabled: true },
     ];
-    try {
-      const entries = readDir(fleetRoot).filter((f) => f.endsWith(".json") || f.endsWith(".json.disabled")).sort();
-      for (const f of entries) {
-        const enabled = !f.endsWith(".disabled");
-        files.push({ name: f, path: `fleet/${f}`, enabled });
-      }
-    } catch { /* expected: fleet dir may not exist */ }
+    const seen = new Set<string>();
+    for (const dir of fleetReadRoots) {
+      try {
+        const entries = readDir(dir).filter((f) => f.endsWith(".json") || f.endsWith(".json.disabled")).sort();
+        for (const f of entries) {
+          if (seen.has(f)) continue;
+          seen.add(f);
+          const enabled = !f.endsWith(".disabled");
+          files.push({ name: f, path: `fleet/${f}`, enabled });
+        }
+      } catch { /* expected: fleet dir may not exist */ }
+    }
     return { files };
   });
 
@@ -69,7 +106,7 @@ export function createConfigApi(deps: ConfigApiDeps = {}) {
     const filePath = query.path;
     if (!filePath) { set.status = 400; return { error: "path required" }; }
     if (filePath.includes("..")) { set.status = 400; return { error: "invalid path" }; }
-    const fullPath = pathJoin(rootDir, filePath);
+    const fullPath = configReadPath(filePath);
     if (!exists(fullPath)) { set.status = 404; return { error: "not found" }; }
     try {
       const content = readFile(fullPath, "utf-8");
@@ -99,7 +136,7 @@ export function createConfigApi(deps: ConfigApiDeps = {}) {
     try {
       const { content } = body;
       JSON.parse(content); // validate JSON
-      const fullPath = pathJoin(rootDir, filePath);
+      const fullPath = configWritePath(filePath);
       if (filePath === "maw.config.json") {
         // Handle masked env values
         const parsed = JSON.parse(content);
@@ -126,7 +163,7 @@ export function createConfigApi(deps: ConfigApiDeps = {}) {
   configApi.post("/config-file/toggle", ({ query, set }) => {
     const filePath = query.path;
     if (!filePath || !filePath.startsWith("fleet/")) { set.status = 400; return { error: "invalid path" }; }
-    const fullPath = pathJoin(rootDir, filePath);
+    const fullPath = fleetReadPath(filePath);
     if (!exists(fullPath)) { set.status = 404; return { error: "not found" }; }
     const isDisabled = filePath.endsWith(".disabled");
     const newPath = isDisabled ? fullPath.replace(/\.disabled$/, "") : fullPath + ".disabled";
@@ -141,7 +178,7 @@ export function createConfigApi(deps: ConfigApiDeps = {}) {
   configApi.delete("/config-file", ({ query, set }) => {
     const filePath = query.path;
     if (!filePath || !filePath.startsWith("fleet/")) { set.status = 400; return { error: "cannot delete" }; }
-    const fullPath = pathJoin(rootDir, filePath);
+    const fullPath = fleetReadPath(filePath);
     if (!exists(fullPath)) { set.status = 404; return { error: "not found" }; }
     unlink(fullPath);
     return { ok: true };

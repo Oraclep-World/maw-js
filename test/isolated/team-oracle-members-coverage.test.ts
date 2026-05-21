@@ -1,10 +1,14 @@
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
-import { join } from "path";
+import { dirname, join } from "path";
 
 const TEST_CONFIG_DIR = mkdtempSync(join(tmpdir(), "maw-team-oracle-members-"));
+const TEST_STATE_DIR = mkdtempSync(join(tmpdir(), "maw-team-oracle-members-state-"));
+const ORIGINAL_MAW_CONFIG_DIR = process.env.MAW_CONFIG_DIR;
+const ORIGINAL_MAW_STATE_DIR = process.env.MAW_STATE_DIR;
 process.env.MAW_CONFIG_DIR = TEST_CONFIG_DIR;
+process.env.MAW_STATE_DIR = TEST_STATE_DIR;
 
 const {
   cmdOracleInvite,
@@ -19,6 +23,10 @@ const originalLog = console.log;
 let logs: string[] = [];
 
 function registryPath(teamName: string) {
+  return join(TEST_STATE_DIR, "teams", teamName, "oracle-members.json");
+}
+
+function legacyRegistryPath(teamName: string) {
   return join(TEST_CONFIG_DIR, "teams", teamName, "oracle-members.json");
 }
 
@@ -30,8 +38,15 @@ function writeRegistry(teamName: string, registry: Record<string, unknown>) {
   writeFileSync(registryPath(teamName), JSON.stringify(registry, null, 2));
 }
 
+function writeLegacyRegistry(teamName: string, registry: Record<string, unknown>) {
+  const path = legacyRegistryPath(teamName);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify(registry, null, 2));
+}
+
 beforeEach(() => {
   rmSync(join(TEST_CONFIG_DIR, "teams"), { recursive: true, force: true });
+  rmSync(join(TEST_STATE_DIR, "teams"), { recursive: true, force: true });
   logs = [];
   console.log = (...args: unknown[]) => {
     logs.push(args.map(String).join(" "));
@@ -44,7 +59,11 @@ afterEach(() => {
 
 afterAll(() => {
   rmSync(TEST_CONFIG_DIR, { recursive: true, force: true });
-  delete process.env.MAW_CONFIG_DIR;
+  rmSync(TEST_STATE_DIR, { recursive: true, force: true });
+  if (ORIGINAL_MAW_CONFIG_DIR === undefined) delete process.env.MAW_CONFIG_DIR;
+  else process.env.MAW_CONFIG_DIR = ORIGINAL_MAW_CONFIG_DIR;
+  if (ORIGINAL_MAW_STATE_DIR === undefined) delete process.env.MAW_STATE_DIR;
+  else process.env.MAW_STATE_DIR = ORIGINAL_MAW_STATE_DIR;
 });
 
 describe("team oracle members isolated coverage", () => {
@@ -147,10 +166,26 @@ describe("team oracle members isolated coverage", () => {
     expect(filterMembers(members, undefined)).toEqual(["lead", "builder"]);
   });
 
-  test("registry files stay inside the temporary MAW_CONFIG_DIR", () => {
+  test("registry files stay inside the temporary MAW_STATE_DIR", () => {
     cmdOracleInvite("sandboxed", "oracle");
 
     expect(existsSync(registryPath("sandboxed"))).toBe(true);
-    expect(registryPath("sandboxed").startsWith(TEST_CONFIG_DIR)).toBe(true);
+    expect(registryPath("sandboxed").startsWith(TEST_STATE_DIR)).toBe(true);
+    expect(existsSync(legacyRegistryPath("sandboxed"))).toBe(false);
+  });
+
+  test("legacy config registries stay readable and next mutation writes state", () => {
+    writeLegacyRegistry("legacy", {
+      name: "legacy",
+      createdAt: "2026-05-20T00:00:00.000Z",
+      members: [{ oracle: "old", role: "builder", addedAt: "2026-05-20T00:00:00.000Z" }],
+    });
+
+    expect(getOracleMembers("legacy")).toEqual(["old"]);
+
+    cmdOracleInvite("legacy", "new", { role: "reviewer" });
+
+    expect(existsSync(registryPath("legacy"))).toBe(true);
+    expect(readRegistry("legacy").members.map((m: { oracle: string }) => m.oracle)).toEqual(["old", "new"]);
   });
 });

@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
@@ -39,6 +39,25 @@ mock.module(sdkPath, sdkMock);
 mock.module(sdkIndexPath, sdkMock);
 mock.module(fleetLoadPath, () => ({
   loadFleetEntries: () => entries,
+  loadDisabledFleetEntries: () => readdirSync(fleetDir)
+    .filter((file) => file.endsWith(".disabled"))
+    .sort()
+    .map((file) => {
+      const path = join(fleetDir, file);
+      const activeName = file.replace(/\.disabled$/i, "");
+      const match = activeName.match(/^(\d+)-(.+)\.json$/);
+      const base = {
+        file,
+        path,
+        num: match ? parseInt(match[1], 10) : 0,
+        groupName: match ? match[2] : activeName.replace(/\.json$/i, ""),
+      };
+      try {
+        return { ...base, session: JSON.parse(readFileSync(path, "utf-8")) };
+      } catch (error) {
+        return { ...base, error };
+      }
+    }),
 }));
 mock.module(ghqRootPath, () => ({
   getGhqRoot: () => ghqRoot,

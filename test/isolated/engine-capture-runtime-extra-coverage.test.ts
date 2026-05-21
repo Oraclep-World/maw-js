@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { join } from "path";
 import { mockSshModule } from "../helpers/mock-ssh";
 
@@ -37,6 +37,9 @@ let spawnImpl: (command: string, args: string[], options: any) => { unref: () =>
 };
 
 const originalAgentName = process.env.CLAUDE_AGENT_NAME;
+const originalMawHome = process.env.MAW_HOME;
+const originalMawConfigDir = process.env.MAW_CONFIG_DIR;
+const originalXdgConfigHome = process.env.XDG_CONFIG_HOME;
 
 function restoreEnv(name: string, value: string | undefined) {
   if (value === undefined) delete process.env[name];
@@ -77,7 +80,16 @@ function resetHookState() {
     return { unref: () => { unrefCalls += 1; } };
   };
   restoreEnv("CLAUDE_AGENT_NAME", originalAgentName);
+  delete process.env.MAW_HOME;
+  delete process.env.MAW_CONFIG_DIR;
+  process.env.XDG_CONFIG_HOME = join(mockHome, ".config");
 }
+
+afterAll(() => {
+  restoreEnv("MAW_HOME", originalMawHome);
+  restoreEnv("MAW_CONFIG_DIR", originalMawConfigDir);
+  restoreEnv("XDG_CONFIG_HOME", originalXdgConfigHome);
+});
 
 async function importHooks(label: string) {
   return import(`../../src/core/runtime/hooks.ts?engine-capture-runtime-extra=${label}-${Date.now()}-${Math.random()}`);
@@ -270,7 +282,7 @@ describe("core/runtime/hooks extra coverage", () => {
     process.env.CLAUDE_AGENT_NAME = "env-oracle";
 
     await runHook("missing_event", { to: "pulse", message: "ignored" });
-    expect(readFileCalls).toEqual([{ path: join(mockHome, ".oracle", "maw.hooks.json"), encoding: "utf-8" }]);
+    expect(readFileCalls).toEqual([{ path: join(mockHome, ".config", "maw", "maw.hooks.json"), encoding: "utf-8" }]);
     expect(spawnCalls).toEqual([]);
 
     await runHook("after_send", { to: "pulse", message: "hello" });
@@ -311,7 +323,7 @@ describe("core/runtime/hooks extra coverage", () => {
     const throwingHooks = await importHooks("spawn-throws");
 
     await expect(throwingHooks.runHook("after_send", { to: "pulse", message: "hello" })).resolves.toBeUndefined();
-    expect(readFileCalls.at(-1)).toEqual({ path: join(mockHome, ".oracle", "maw.hooks.json"), encoding: "utf-8" });
+    expect(readFileCalls.at(-1)).toEqual({ path: join(mockHome, ".config", "maw", "maw.hooks.json"), encoding: "utf-8" });
     expect(unrefCalls).toBe(0);
   });
 });

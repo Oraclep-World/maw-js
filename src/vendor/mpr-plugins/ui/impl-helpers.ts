@@ -7,7 +7,7 @@
 
 import { existsSync } from "fs";
 import { join } from "path";
-import { homedir } from "os";
+import { mawDataPath } from "../../../core/xdg";
 import { loadConfig } from "maw-js/config";
 import { ghqFindSync } from "maw-js/core/ghq";
 
@@ -64,9 +64,9 @@ export function justHost(hostPort: string): string {
   return hostPort.split(":")[0];
 }
 
-/** Check if maw-ui dist is installed at ~/.maw/ui/dist/ */
+/** Check if maw-ui dist is installed at maw's XDG data dist path. */
 export function isUiDistInstalled(): boolean {
-  const distDir = join(homedir(), ".maw", "ui", "dist");
+  const distDir = mawDataPath("ui", "dist");
   return existsSync(join(distDir, "index.html"));
 }
 

@@ -1,13 +1,15 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
-import { join } from "path";
+import { dirname, join } from "path";
 import type { OracleManifestEntry } from "maw-js/lib/oracle-manifest";
 import {
   cmdPruneStale,
   findPruneCandidates,
   isCwdSelfExclude,
   isStaleByManifest,
+  legacyOraclesCachePath,
+  oraclesCachePath,
   readOraclesCache,
   writeOraclesCache,
   type OracleEntryLite,
@@ -93,6 +95,42 @@ describe("cleanup prune stale branch coverage", () => {
     expect(written).toMatchObject({ schema: 2, owner: "keep" });
     expect(written.oracles.map((e: OracleEntryLite) => e.name)).toEqual(["new"]);
     expect(readFileSync(file, "utf-8").endsWith("\n")).toBe(true);
+  });
+
+
+  test("default cache I/O writes cache path and reads legacy config fallback", () => {
+    const dir = tempDir();
+    const envKeys = ["MAW_HOME", "MAW_CACHE_DIR", "MAW_CONFIG_DIR", "MAW_XDG"] as const;
+    const original = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+
+    try {
+      delete process.env.MAW_HOME;
+      delete process.env.MAW_XDG;
+      process.env.MAW_CACHE_DIR = join(dir, "cache");
+      process.env.MAW_CONFIG_DIR = join(dir, "legacy-config");
+
+      const primary = oraclesCachePath();
+      const legacy = legacyOraclesCachePath();
+      mkdirSync(dirname(legacy), { recursive: true });
+      writeFileSync(legacy, JSON.stringify({ schema: 1, source: "legacy", oracles: [entry("legacy")] }, null, 2));
+
+      expect(primary).toBe(join(dir, "cache", "oracles.json"));
+      expect(legacy).toBe(join(dir, "legacy-config", "oracles.json"));
+      expect(readOraclesCache()?.entries.map((e) => e.name)).toEqual(["legacy"]);
+
+      writeOraclesCache({ raw: { schema: 1, source: "primary" }, entries: [entry("primary")] });
+
+      const written = JSON.parse(readFileSync(primary, "utf-8"));
+      expect(written).toMatchObject({ schema: 1, source: "primary" });
+      expect(written.oracles.map((e: OracleEntryLite) => e.name)).toEqual(["primary"]);
+      expect(readOraclesCache()?.entries.map((e) => e.name)).toEqual(["primary"]);
+    } finally {
+      for (const key of envKeys) {
+        const value = original[key];
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
   });
 
   test("cmdPruneStale preview paths report missing cache, nothing-to-prune, and yes/ask hints", async () => {

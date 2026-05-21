@@ -35,7 +35,13 @@ mock.module("fs", () => ({
 
 mock.module("maw-js/core/paths", () => ({
   CONFIG_FILE: "/tmp/maw.config.json",
-  FLEET_DIR: "/tmp/fleet",
+}));
+
+mock.module("maw-js/commands/shared/fleet-load", () => ({
+  fleetDirForWrite: () => "/tmp/fleet",
+  loadFleetEntries: () => fleetEntries
+    .filter((file) => file.endsWith(".json"))
+    .map((file) => ({ file, path: `/tmp/fleet/${file}`, num: 0, groupName: file, session: { name: file, windows: [] } })),
 }));
 
 mock.module(join(srcRoot, "src/vendor/mpr-plugins/init/non-interactive"), () => ({

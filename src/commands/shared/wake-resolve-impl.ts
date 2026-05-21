@@ -1,14 +1,14 @@
-import { hostExec, tmux, FLEET_DIR, curlFetch } from "../../sdk";
+import { hostExec, tmux, curlFetch } from "../../sdk";
 import { loadConfig, getEnvVars } from "../../config";
 import { ghqFind, ghqList } from "../../core/ghq";
 import { pickOracle, resolveOracle as resolveSharedOracle, type OracleRef } from "../../core/resolve";
 import { resolveFleetWindowSessionTarget, resolveNumericFleetStemPrefix, resolveSessionTarget } from "../../core/matcher/resolve-target";
 import { isInfrastructureChannelSessionName } from "../../core/matcher/channel-session";
-import { readdirSync, readFileSync, existsSync, statSync } from "fs";
+import { readdirSync, existsSync, statSync } from "fs";
 import { join } from "path";
 import { scanWorktrees, type WorktreeInfo } from "../../core/fleet/worktrees-scan";
 import { scanSuggestOracle } from "./wake-resolve-scan-suggest";
-import type { FleetSession, FleetWindow } from "./fleet-load";
+import { loadFleet, type FleetWindow } from "./fleet-load";
 import type { Session } from "../../core/runtime/find-window";
 
 /**
@@ -216,8 +216,7 @@ export async function resolveOracle(
   // Fleet configs — oracle known in a fleet, repo may need to be cloned (#237)
   let fleetRepo: string | null = null;
   try {
-    for (const file of readdirSync(FLEET_DIR).filter(f => f.endsWith(".json"))) {
-      const config = JSON.parse(readFileSync(join(FLEET_DIR, file), "utf-8")) as FleetSession;
+    for (const config of loadFleet()) {
       const win = (config.windows || []).find((w: FleetWindow) => w.name === `${oracle}-oracle` || w.name === oracle);
       if (win?.repo) {
         const fullPath = await ghqFind(`/${win.repo.replace(/^[^/]+\//, "")}`);
@@ -399,10 +398,7 @@ export function getSessionMap(): Record<string, string> { return loadConfig().se
 
 export function resolveFleetSession(oracle: string): string | null {
   try {
-    const configs = readdirSync(FLEET_DIR)
-      .filter(f => f.endsWith(".json") && !f.endsWith(".disabled"))
-      .map(file => JSON.parse(readFileSync(join(FLEET_DIR, file), "utf-8")) as FleetSession);
-    const resolved = resolveFleetWindowSessionTarget(oracle, configs);
+    const resolved = resolveFleetWindowSessionTarget(oracle, loadFleet());
     if (resolved.kind === "fuzzy" || resolved.kind === "exact") return resolved.match.name;
   } catch { /* fleet dir may not exist */ }
   return null;

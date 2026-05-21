@@ -139,6 +139,40 @@ describe("oracle impl-register next coverage", () => {
     expect(register.findInFleet("direct", join(TEST_ROOT, "missing-fleet"))).toBeNull();
   });
 
+  test("findInFleet accepts state-first read dirs and ignores duplicate legacy files", () => {
+    const stateFleetDir = join(TEST_ROOT, "state-fleet-register");
+    const legacyFleetDir = join(TEST_ROOT, "legacy-fleet-register");
+    mkdirSync(stateFleetDir, { recursive: true });
+    mkdirSync(legacyFleetDir, { recursive: true });
+    writeFileSync(
+      join(stateFleetDir, "01-stateful.json"),
+      JSON.stringify({
+        windows: [{ name: "stateful-oracle" }],
+        project_repos: ["StateOrg/stateful-oracle"],
+      }),
+      "utf8",
+    );
+    writeFileSync(
+      join(legacyFleetDir, "01-stateful.json"),
+      JSON.stringify({
+        windows: [{ name: "stateful-oracle" }],
+        project_repos: ["LegacyOrg/stateful-oracle"],
+      }),
+      "utf8",
+    );
+
+    const found = register.findInFleet("stateful", [stateFleetDir, legacyFleetDir]);
+
+    expect(found).toMatchObject({
+      source: "fleet",
+      entry: {
+        org: "StateOrg",
+        repo: "stateful-oracle",
+        name: "stateful",
+      },
+    });
+  });
+
   test("findInFilesystem skips non-directories and finds direct repo names without psi", () => {
     const root = join(TEST_ROOT, "repos-root");
     mkdirSync(root, { recursive: true });

@@ -51,6 +51,9 @@ const original = {
   stdoutWrite: process.stdout.write,
   testMode: process.env.MAW_TEST_MODE,
   home: process.env.HOME,
+  mawHome: process.env.MAW_HOME,
+  mawDataDir: process.env.MAW_DATA_DIR,
+  mawXdg: process.env.MAW_XDG,
 };
 
 type Capture = {
@@ -103,6 +106,9 @@ async function captureRun(
   let threw: unknown;
 
   process.env.HOME = homeDir;
+  delete process.env.MAW_HOME;
+  delete process.env.MAW_DATA_DIR;
+  delete process.env.MAW_XDG;
   if (opts.testMode === null) delete process.env.MAW_TEST_MODE;
   else process.env.MAW_TEST_MODE = opts.testMode ?? "1";
 
@@ -208,6 +214,12 @@ afterEach(() => {
   else process.env.MAW_TEST_MODE = original.testMode;
   if (original.home === undefined) delete process.env.HOME;
   else process.env.HOME = original.home;
+  if (original.mawHome === undefined) delete process.env.MAW_HOME;
+  else process.env.MAW_HOME = original.mawHome;
+  if (original.mawDataDir === undefined) delete process.env.MAW_DATA_DIR;
+  else process.env.MAW_DATA_DIR = original.mawDataDir;
+  if (original.mawXdg === undefined) delete process.env.MAW_XDG;
+  else process.env.MAW_XDG = original.mawXdg;
   if (tempRoot && existsSync(tempRoot)) rmSync(tempRoot, { recursive: true, force: true });
 });
 
@@ -278,7 +290,7 @@ describe("cmd-update runtime coverage", () => {
       ["bun", "add", "-g", "github:Soul-Brews-Studio/maw-js#v26.5.16-alpha.1053"],
     ]);
     expect(execSyncCalls).toContain(`cd ${cloneDir} && bun link`);
-    expect(execSyncCalls).toContain(`cd ${join(homeDir, ".oracle")} && bun link maw`);
+    expect(execSyncCalls).toContain(`cd ${join(homeDir, ".maw", "oracle-plugins")} && bun link maw`);
     expect(execSyncCalls).toContain("which maw");
     expect(existsSync(join(homeDir, ".maw", "plugins", "runtime-plugin", "plugin.json"))).toBe(true);
     expect(res.stdout).toContain("SDK linked");

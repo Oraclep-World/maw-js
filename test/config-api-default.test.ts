@@ -51,6 +51,55 @@ describe("config API file routes", () => {
     });
   });
 
+  test("lists and reads XDG state fleet files before legacy fallback files", async () => {
+    const writes: any[] = [];
+    const app = makeApp({
+      rootDir: "/root",
+      fleetDir: "/state/fleet",
+      fleetDirs: ["/state/fleet", "/legacy/fleet"],
+      readdirSync: ((dir: string) => {
+        if (dir === "/state/fleet") return ["01-state.json", "same.json", "skip.txt"] as any;
+        if (dir === "/legacy/fleet") return ["02-legacy.json", "same.json"] as any;
+        return [] as any;
+      }) as any,
+      existsSync: ((path: string) => {
+        return [
+          "/state/fleet/01-state.json",
+          "/state/fleet/same.json",
+          "/legacy/fleet/02-legacy.json",
+        ].includes(path);
+      }) as any,
+      readFileSync: ((path: string) => {
+        if (path === "/state/fleet/01-state.json") return "{\"source\":\"state\"}";
+        if (path === "/state/fleet/same.json") return "{\"source\":\"state-duplicate\"}";
+        if (path === "/legacy/fleet/same.json") throw new Error("legacy duplicate should be skipped");
+        if (path === "/legacy/fleet/02-legacy.json") return "{\"source\":\"legacy\"}";
+        throw new Error(`unexpected read ${path}`);
+      }) as any,
+      writeFileSync: ((...args: any[]) => { writes.push(args); }) as any,
+    });
+
+    expect(await readJson(await app.handle(new Request("http://localhost/config-files")))).toEqual({
+      files: [
+        { name: "maw.config.json", path: "maw.config.json", enabled: true },
+        { name: "01-state.json", path: "fleet/01-state.json", enabled: true },
+        { name: "same.json", path: "fleet/same.json", enabled: true },
+        { name: "02-legacy.json", path: "fleet/02-legacy.json", enabled: true },
+      ],
+    });
+
+    expect(await readJson(await app.handle(new Request("http://localhost/config-file?path=fleet/01-state.json")))).toEqual({
+      content: "{\"source\":\"state\"}",
+    });
+    expect(await readJson(await app.handle(new Request("http://localhost/config-file?path=fleet/02-legacy.json")))).toEqual({
+      content: "{\"source\":\"legacy\"}",
+    });
+
+    const save = await app.handle(jsonRequest("/config-file?path=fleet/new.json", "POST", { content: "{\"ok\":true}" }));
+    expect(save.status).toBe(200);
+    expect(writes).toEqual([["/state/fleet/new.json", "{\"ok\":true}\n", "utf-8"]]);
+  });
+
   test("GET /config-file validates and reads files", async () => {
     const app = makeApp({
       rootDir: "/root",

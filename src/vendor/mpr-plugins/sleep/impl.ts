@@ -3,11 +3,11 @@ import { detectSession } from "maw-js/commands/shared/wake";
 import { loadFleet } from "maw-js/commands/shared/fleet-load";
 import { saveTabOrder } from "maw-js/sdk";
 import { appendFile, mkdir } from "fs/promises";
-import { homedir } from "os";
-import { join } from "path";
+import { dirname } from "path";
 import { takeSnapshot } from "maw-js/sdk";
 import { runSleepLifecycleHooks } from "maw-js/plugin/lifecycle";
 import { resolveSleepTarget } from "./resolve-target";
+import { mawMessageLogPath } from "../../../core/xdg";
 
 /**
  * maw sleep <target> [window]
@@ -89,8 +89,7 @@ async function doSleep(session: string, windowName: string, oracle: string) {
   }
 
   // 4. Log the sleep event
-  const logDir = join(homedir(), ".oracle");
-  const logFile = join(logDir, "maw-log.jsonl");
+  const logFile = mawMessageLogPath();
   const line = JSON.stringify({
     ts: new Date().toISOString(),
     type: "sleep",
@@ -98,7 +97,7 @@ async function doSleep(session: string, windowName: string, oracle: string) {
     window: windowName,
   }) + "\n";
   try {
-    await mkdir(logDir, { recursive: true });
+    await mkdir(dirname(logFile), { recursive: true });
     await appendFile(logFile, line);
   } catch (e) { console.error(`\x1b[33m⚠\x1b[0m sleep log write failed: ${e}`); }
 

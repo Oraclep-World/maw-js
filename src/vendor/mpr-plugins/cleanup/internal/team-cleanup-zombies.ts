@@ -1,10 +1,10 @@
-import { readdirSync, existsSync, readFileSync } from "fs";
+import { readdirSync, existsSync } from "fs";
 import { join } from "path";
-import { homedir } from "os";
 import { tmux } from "maw-js/sdk";
 import type { TmuxPane } from "maw-js/sdk";
 import { loadFleetEntries } from "maw-js/commands/shared/fleet-load";
 import { TEAMS_DIR, loadTeam } from "./team-helpers";
+import { readOraclesCache } from "./prune-stale-oracles";
 
 // ─── maw cleanup --zombie-agents ───
 
@@ -97,13 +97,9 @@ export function findZombiePanes(allPanes: TmuxPane[]): ZombiePane[] {
   // names follow the convention "<N>-<oracle-name>"; strip the numeric
   // prefix and check against `.oracles[].name`.
   const knownOracleNames = new Set<string>();
-  try {
-    const raw = readFileSync(join(homedir(), ".config", "maw", "oracles.json"), "utf-8");
-    const parsed = JSON.parse(raw) as { oracles?: Array<{ name?: string }> };
-    for (const o of parsed.oracles ?? []) {
-      if (typeof o.name === "string" && o.name) knownOracleNames.add(o.name);
-    }
-  } catch { /* no oracles.json — skip */ }
+  for (const o of readOraclesCache()?.entries ?? []) {
+    if (typeof o.name === "string" && o.name) knownOracleNames.add(o.name);
+  }
 
   // Also allow meta-view sessions (maw-view + any *-view) which mirror fleet
   // panes. Each oracle creates its meta-view as `<stem>-view` (e.g.

@@ -2,7 +2,7 @@ import { hostExec, listSessions } from "../transport/ssh";
 import { getGhqRoot } from "../../config/ghq-root";
 import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
-import { FLEET_DIR } from "../paths";
+import { fleetDirForWrite, fleetDirsForRead, uniqueDirs } from "./paths";
 import { resolveWorktreeWindow } from "./worktree-window-match";
 import type { Session } from "../runtime/find-window";
 
@@ -23,7 +23,10 @@ export interface ScanWorktreesDeps {
   getGhqRoot: () => string;
   readdirSync: (path: string) => string[];
   readFileSync: (path: string, encoding: "utf-8") => string;
+  /** Legacy single-dir override kept for tests and older callers. */
   fleetDir: string;
+  /** State-first fleet dirs; when omitted, XDG state falls back to legacy config. */
+  fleetDirs?: string[];
   error: (...args: unknown[]) => void;
 }
 
@@ -34,7 +37,8 @@ function scanDeps(overrides: Partial<ScanWorktreesDeps>): ScanWorktreesDeps {
     getGhqRoot: overrides.getGhqRoot ?? getGhqRoot,
     readdirSync: overrides.readdirSync ?? (readdirSync as unknown as ScanWorktreesDeps["readdirSync"]),
     readFileSync: overrides.readFileSync ?? (readFileSync as unknown as ScanWorktreesDeps["readFileSync"]),
-    fleetDir: overrides.fleetDir ?? FLEET_DIR,
+    fleetDir: overrides.fleetDir ?? fleetDirForWrite(),
+    fleetDirs: overrides.fleetDirs ?? (overrides.fleetDir ? [overrides.fleetDir] : fleetDirsForRead()),
     error: overrides.error ?? console.error,
   };
 }
@@ -49,7 +53,7 @@ function scanDeps(overrides: Partial<ScanWorktreesDeps>): ScanWorktreesDeps {
 export async function scanWorktrees(deps: Partial<ScanWorktreesDeps> = {}): Promise<WorktreeInfo[]> {
   const d = scanDeps(deps);
   const reposRoot = join(d.getGhqRoot(), "github.com");
-  const fleetDir = d.fleetDir;
+  const fleetDirs = uniqueDirs(d.fleetDirs?.length ? d.fleetDirs : [d.fleetDir]);
 
   // 1. Find all .wt- directories
   // #1553 — dedupe paths; `find` can surface the same .wt-* dir multiple times
@@ -77,14 +81,24 @@ export async function scanWorktrees(deps: Partial<ScanWorktreesDeps> = {}): Prom
 
   // 3. Load fleet configs for matching
   const fleetWindows = new Map<string, string>(); // repo -> fleet file
-  try {
-    for (const file of d.readdirSync(fleetDir).filter(f => f.endsWith(".json"))) {
-      const cfg = JSON.parse(d.readFileSync(join(fleetDir, file), "utf-8"));
-      for (const w of cfg.windows || []) {
-        if (w.repo) fleetWindows.set(w.repo, file);
+  const seenFleetFiles = new Set<string>();
+  for (const fleetDir of fleetDirs) {
+    try {
+      for (const file of d.readdirSync(fleetDir).filter(f => f.endsWith(".json")).sort()) {
+        if (seenFleetFiles.has(file)) continue;
+        seenFleetFiles.add(file);
+        try {
+          const cfg = JSON.parse(d.readFileSync(join(fleetDir, file), "utf-8"));
+          for (const w of cfg.windows || []) {
+            // Fleet dirs are ordered by precedence (XDG state before legacy).
+            // Keep the first source that mentions a repo so lower-precedence
+            // legacy configs cannot shadow migrated state.
+            if (w.repo && !fleetWindows.has(w.repo)) fleetWindows.set(w.repo, file);
+          }
+        } catch { /* invalid fleet file */ }
       }
-    }
-  } catch { /* no fleet dir */ }
+    } catch { /* no fleet dir */ }
+  }
 
   // 4. Classify each worktree
   const results: WorktreeInfo[] = [];

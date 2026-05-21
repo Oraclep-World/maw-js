@@ -6,7 +6,7 @@
  * filesystem writes to per-test temp homes.
  */
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import * as realChild from "node:child_process";
@@ -27,6 +27,9 @@ type WindowFixture = {
 };
 
 const homeDir = mkdtempSync(join(tmpdir(), "maw-park-home-"));
+const legacyParkedDir = join(homeDir, ".config/maw/parked");
+process.env.MAW_STATE_DIR = join(homeDir, ".maw-state");
+process.env.MAW_CONFIG_DIR = join(homeDir, ".config/maw");
 let sessionName = "oracle";
 let currentWindow = "coding";
 let windows: WindowFixture[] = [];
@@ -108,6 +111,7 @@ const { PARKED_DIR, cmdPark, cmdParkLs, resolvePark, timeAgo } = impl;
 
 beforeEach(() => {
   rmSync(PARKED_DIR, { recursive: true, force: true });
+  rmSync(legacyParkedDir, { recursive: true, force: true });
   sessionName = "oracle";
   currentWindow = "coding";
   windows = [
@@ -258,6 +262,35 @@ describe("vendored park impl coverage", () => {
     expect(output).toContain("feature/review");
     expect(output).toContain("clean");
     expect(output).not.toContain("ignore.txt");
+  });
+
+  test("cmdParkLs includes legacy config parked snapshots while new writes use state", async () => {
+    await cmdPark("state", "snapshot");
+    expect(existsSync(join(PARKED_DIR, "coding.json"))).toBe(true);
+    expect(existsSync(join(legacyParkedDir, "coding.json"))).toBe(false);
+
+    mkdirSync(legacyParkedDir, { recursive: true });
+    writeFileSync(
+      join(legacyParkedDir, "legacy.json"),
+      JSON.stringify({
+        window: "legacy",
+        session: "oracle",
+        branch: "old",
+        cwd: windows[0].cwd,
+        lastCommit: "0000000 legacy work",
+        dirtyFiles: [],
+        note: "legacy parked tab",
+        parkedAt: new Date(Date.now() - 60_000).toISOString(),
+      }),
+    );
+
+    logs = [];
+    await cmdParkLs();
+
+    const output = logs.join("\n");
+    expect(output).toContain("coding");
+    expect(output).toContain("legacy");
+    expect(output).toContain("legacy parked tab");
   });
 
   test("tmux failures surface stderr and prevent snapshot writes", async () => {

@@ -1,5 +1,6 @@
 import { mkdirSync, existsSync, readdirSync, symlinkSync, cpSync, readFileSync, lstatSync, unlinkSync, realpathSync } from "fs";
 import { join } from "path";
+import { info, warn } from "./verbosity";
 
 /** Allowlist: only http/https URLs may be used as plugin sources */
 const URL_SCHEME_RE = /^https?:\/\//;
@@ -171,7 +172,7 @@ export async function runBootstrap(pluginDir: string, srcDir: string): Promise<v
       for (const url of sources) {
         try {
           if (!URL_SCHEME_RE.test(url)) {
-            console.warn(`[maw] skipping pluginSource with invalid scheme: ${url}`);
+            warn(`[maw] skipping pluginSource with invalid scheme: ${url}`);
             continue;
           }
           const ghqProc = Bun.spawn(["ghq", "get", "-u", url], { stdout: "pipe", stderr: "pipe" });
@@ -200,6 +201,6 @@ export async function runBootstrap(pluginDir: string, srcDir: string): Promise<v
       }
     } catch {}
 
-    console.log(`[maw] bootstrapped ${readdirSync(pluginDir).length} plugins → ${pluginDir}`);
+    info(`[maw] bootstrapped ${readdirSync(pluginDir).length} plugins → ${pluginDir}`);
   }
 }

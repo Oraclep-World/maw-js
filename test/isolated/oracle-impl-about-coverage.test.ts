@@ -1,6 +1,6 @@
 /** Targeted isolated coverage for src/commands/plugins/oracle/impl-about.ts. */
 import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
@@ -30,6 +30,22 @@ let logs: string[] = [];
 
 const originalLog = console.log;
 
+function loadTestFleetEntries() {
+  return readdirSync(TEST_FLEET_DIR)
+    .filter(file => file.endsWith(".json") && !file.endsWith(".disabled"))
+    .sort()
+    .map(file => {
+      const match = file.match(/^(\d+)-(.+)\.json$/);
+      return {
+        file,
+        path: join(TEST_FLEET_DIR, file),
+        num: match ? Number.parseInt(match[1], 10) : 0,
+        groupName: match ? match[2] : file.replace(/\.json$/, ""),
+        session: JSON.parse(readFileSync(join(TEST_FLEET_DIR, file), "utf-8") || "{}"),
+      };
+    });
+}
+
 mock.module(import.meta.resolve("../../src/sdk"), () => ({
   FLEET_DIR: TEST_FLEET_DIR,
   listSessions: async () => sessions,
@@ -50,6 +66,10 @@ mock.module(import.meta.resolve("../../src/commands/shared/wake"), () => ({
     findWorktreeCalls.push({ parentDir, repoName });
     return worktrees;
   },
+}));
+
+mock.module(import.meta.resolve("../../src/commands/shared/fleet-load"), () => ({
+  loadFleetEntries: loadTestFleetEntries,
 }));
 
 mock.module(import.meta.resolve("../../src/commands/plugins/oracle/impl-helpers"), () => ({

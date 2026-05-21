@@ -12,6 +12,7 @@ let spawnCalls: Array<{ command: string; args: string[]; env?: Record<string, st
 
 const saved = {
   home: process.env.MAW_HOME,
+  state: process.env.MAW_STATE_DIR,
   config: process.env.MAW_CONFIG_DIR,
   engineUrl: process.env.MAW_ENGINE_URL,
   mawPort: process.env.MAW_PORT,
@@ -93,6 +94,7 @@ function engineStub(options: { initialRegistration?: boolean } = {}) {
 beforeEach(() => {
   tmpHome = mkdtempSync(join(tmpdir(), "maw-vendor-messages-third-"));
   process.env.MAW_HOME = tmpHome;
+  delete process.env.MAW_STATE_DIR;
   delete process.env.MAW_CONFIG_DIR;
   delete process.env.MAW_ENGINE_URL;
   delete process.env.MAW_PORT;
@@ -109,6 +111,7 @@ beforeEach(() => {
 
 afterEach(() => {
   restoreEnv("MAW_HOME", saved.home);
+  restoreEnv("MAW_STATE_DIR", saved.state);
   restoreEnv("MAW_CONFIG_DIR", saved.config);
   restoreEnv("MAW_ENGINE_URL", saved.engineUrl);
   restoreEnv("MAW_PORT", saved.mawPort);
@@ -250,6 +253,32 @@ describe("vendor messages third pass coverage", () => {
       expect(existsSync(supervisorFile("messages.pid"))).toBe(true);
     } finally {
       engine.stop();
+    }
+  });
+
+  test("detach supervisor files follow MAW_STATE_DIR when MAW_HOME is absent", async () => {
+    const engine = engineStub();
+    const stateDir = mkdtempSync(join(tmpdir(), "maw-vendor-messages-state-"));
+    delete process.env.MAW_HOME;
+    process.env.MAW_STATE_DIR = stateDir;
+    fastPollingClock();
+    onSpawn = () => engine.setRegistered();
+
+    try {
+      const result = await messagesHandler({
+        source: "cli",
+        args: ["serve", "--detach", "--engine", engine.url],
+      });
+
+      const statePid = join(stateDir, "engine-plugins", "messages.pid");
+      const stateLog = join(stateDir, "engine-plugins", "messages.log");
+      expect(result.ok).toBe(true);
+      expect(result.output).toContain(`log: ${stateLog}`);
+      expect(existsSync(statePid)).toBe(true);
+      expect(existsSync(supervisorFile("messages.pid"))).toBe(false);
+    } finally {
+      engine.stop();
+      rmSync(stateDir, { recursive: true, force: true });
     }
   });
 

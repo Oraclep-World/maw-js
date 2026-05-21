@@ -50,11 +50,13 @@ const { cmdTag } = tagImpl;
 describe("vendor scope impl isolated coverage", () => {
   const originalMawHome = process.env.MAW_HOME;
   const originalConfigDir = process.env.MAW_CONFIG_DIR;
+  const originalXdgConfigHome = process.env.XDG_CONFIG_HOME;
   let dir: string;
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "maw-scope-impl-"));
     delete process.env.MAW_HOME;
+    delete process.env.XDG_CONFIG_HOME;
     process.env.MAW_CONFIG_DIR = join(dir, "config");
   });
 
@@ -63,6 +65,8 @@ describe("vendor scope impl isolated coverage", () => {
     else process.env.MAW_HOME = originalMawHome;
     if (originalConfigDir === undefined) delete process.env.MAW_CONFIG_DIR;
     else process.env.MAW_CONFIG_DIR = originalConfigDir;
+    if (originalXdgConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = originalXdgConfigHome;
     rmSync(dir, { recursive: true, force: true });
   });
 
@@ -77,6 +81,11 @@ describe("vendor scope impl isolated coverage", () => {
     process.env.MAW_HOME = join(dir, "home");
     process.env.MAW_CONFIG_DIR = join(dir, "ignored-config");
     expect(scopesDir()).toBe(join(dir, "home", "config", "scopes"));
+
+    delete process.env.MAW_HOME;
+    delete process.env.MAW_CONFIG_DIR;
+    process.env.XDG_CONFIG_HOME = join(dir, "xdg-config");
+    expect(scopesDir()).toBe(join(dir, "xdg-config", "maw", "scopes"));
   });
 
   test("creates, lists, shows, formats, and deletes scope files without overwriting", () => {

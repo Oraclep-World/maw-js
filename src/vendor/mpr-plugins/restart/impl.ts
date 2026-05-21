@@ -14,7 +14,9 @@ import { listSessions } from "maw-js/sdk";
 import { Tmux } from "maw-js/sdk";
 import { cmdSleep, cmdWakeAll } from "maw-js/commands/shared/fleet";
 import { execSync } from "child_process";
+import { existsSync, mkdirSync, writeFileSync } from "fs";
 import { ghqFindSync } from "maw-js/core/ghq";
+import { mawDataPath } from "../../../core/xdg";
 
 const HELP_TEXT = [
   "usage: maw restart [--no-update] [--ref <git-ref>]",
@@ -92,10 +94,10 @@ export async function cmdRestart(opts: { noUpdate?: boolean; ref?: string; help?
         const mawDir = ghqFindSync("/Soul-Brews-Studio/maw-js");
         if (mawDir) {
           execSync(`cd ${mawDir} && bun link`, { stdio: "pipe" });
-          const oDir = require("os").homedir() + "/.oracle";
-          require("fs").mkdirSync(oDir, { recursive: true });
-          if (!require("fs").existsSync(oDir + "/package.json")) {
-            require("fs").writeFileSync(oDir + "/package.json", '{"name":"oracle-plugins","private":true}\n');
+          const oDir = mawDataPath("oracle-plugins");
+          mkdirSync(oDir, { recursive: true });
+          if (!existsSync(oDir + "/package.json")) {
+            writeFileSync(oDir + "/package.json", '{"name":"oracle-plugins","private":true}\n');
           }
           execSync(`cd ${oDir} && bun link maw`, { stdio: "pipe" });
           console.log(`    🔗 SDK linked`);

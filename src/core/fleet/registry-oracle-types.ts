@@ -27,6 +27,14 @@ export interface RegistryCache {
   oracles: OracleEntry[];
 }
 
-export const CACHE_FILE = mawCachePath("oracles.json");
-export const LEGACY_CACHE_FILE = mawConfigPath("oracles.json");
+export function registryCacheFilePath(): string {
+  return mawCachePath("oracles.json");
+}
+
+export function legacyRegistryCacheFilePath(): string {
+  return mawConfigPath("oracles.json");
+}
+
+export const CACHE_FILE = registryCacheFilePath();
+export const LEGACY_CACHE_FILE = legacyRegistryCacheFilePath();
 export const STALE_HOURS = 1;

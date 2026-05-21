@@ -1,40 +1,36 @@
 /** Targeted runtime coverage for src/vendor/mpr-plugins/completions/impl.ts. */
-import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
-import { join } from "path";
-import { tmpdir } from "os";
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 
-const fleetDir = mkdtempSync(join(tmpdir(), "maw-completions-fleet-"));
 let discoveredPackages: any[] | Error = [];
+let fleetSessions: any[] | Error = [];
 let logs: string[] = [];
 let errors: string[] = [];
 
 const originalLog = console.log;
 const originalError = console.error;
 
-mock.module("maw-js/sdk", () => ({ FLEET_DIR: fleetDir }));
 mock.module("maw-js/plugin/registry", () => ({
   discoverPackages: () => {
     if (discoveredPackages instanceof Error) throw discoveredPackages;
     return discoveredPackages;
   },
 }));
+mock.module("maw-js/commands/shared/fleet-load", () => ({
+  loadFleet: () => {
+    if (fleetSessions instanceof Error) throw fleetSessions;
+    return fleetSessions;
+  },
+}));
 
 const { cmdCompletions } = await import("../../src/vendor/mpr-plugins/completions/impl.ts?completions-runtime-coverage");
-
-function resetFleetDir() {
-  rmSync(fleetDir, { recursive: true, force: true });
-  mkdirSync(fleetDir, { recursive: true });
-  writeFileSync(join(fleetDir, ".keep"), "", { flag: "w" });
-}
 
 function stdout(): string {
   return logs.join("\n");
 }
 
 beforeEach(() => {
-  resetFleetDir();
   discoveredPackages = [];
+  fleetSessions = [];
   logs = [];
   errors = [];
   console.log = (line?: unknown) => { logs.push(String(line ?? "")); };
@@ -44,10 +40,6 @@ beforeEach(() => {
 afterEach(() => {
   console.log = originalLog;
   console.error = originalError;
-});
-
-afterAll(() => {
-  rmSync(fleetDir, { recursive: true, force: true });
 });
 
 describe("completions impl runtime coverage", () => {
@@ -86,17 +78,16 @@ describe("completions impl runtime coverage", () => {
     expect(commands).toContain("serve");
   });
 
-  test("oracles and windows are derived from enabled fleet json files only", async () => {
-    writeFileSync(join(fleetDir, "01-live.json"), JSON.stringify({
-      windows: [
-        { name: "neo-oracle" },
-        { name: "mawjs" },
-        { name: "arra-oracle" },
-      ],
-    }));
-    writeFileSync(join(fleetDir, "02-disabled.json.disabled"), JSON.stringify({
-      windows: [{ name: "sleeping-oracle" }],
-    }));
+  test("oracles and windows are derived from the shared XDG-aware fleet loader", async () => {
+    fleetSessions = [
+      {
+        windows: [
+          { name: "neo-oracle" },
+          { name: "mawjs" },
+          { name: "arra-oracle" },
+        ],
+      },
+    ];
 
     await cmdCompletions("oracles");
     const oracles = stdout();

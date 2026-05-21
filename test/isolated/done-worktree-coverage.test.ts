@@ -17,6 +17,7 @@ type HostExecHandler = (command: string) => string | Promise<string>;
 
 let hostExecCalls: string[] = [];
 let hostExecHandler: HostExecHandler = () => "";
+let fleetReadDirs: string[] = [FLEET_DIR];
 
 mock.module("maw-js/sdk", () => ({
   FLEET_DIR,
@@ -24,6 +25,10 @@ mock.module("maw-js/sdk", () => ({
     hostExecCalls.push(command);
     return await hostExecHandler(command);
   },
+}));
+
+mock.module("maw-js/commands/shared/fleet-load", () => ({
+  fleetDirsForRead: () => fleetReadDirs,
 }));
 
 const {
@@ -66,6 +71,7 @@ beforeEach(() => {
   resetSandbox();
   hostExecCalls = [];
   hostExecHandler = () => "";
+  fleetReadDirs = [FLEET_DIR];
 });
 
 afterAll(() => {
@@ -97,6 +103,32 @@ describe("removeWorktreeViaConfig", () => {
     ]);
     expect(output).toContain("removed worktree Soul-Brews-Studio/maw-js.wt-123-feature");
     expect(output).toContain("deleted branch feature/done-cleanup");
+  });
+
+  test("uses state fleet configs before duplicate legacy configs", async () => {
+    const stateFleetDir = join(SANDBOX, "state-fleet");
+    mkdirSync(stateFleetDir, { recursive: true });
+    fleetReadDirs = [stateFleetDir, FLEET_DIR];
+    writeFileSync(
+      join(stateFleetDir, "oracle.json"),
+      JSON.stringify({ windows: [{ name: "FeaturePane", repo: "StateOrg/state-repo.wt-feature" }] }),
+      "utf-8",
+    );
+    writeFleetConfig("oracle.json", {
+      windows: [{ name: "FeaturePane", repo: "LegacyOrg/legacy-repo.wt-feature" }],
+    });
+
+    hostExecHandler = (command) => {
+      if (command.includes("rev-parse --abbrev-ref HEAD")) return "main\n";
+      return "";
+    };
+
+    expect(await removeWorktreeViaConfig("featurepane", REPOS_ROOT)).toBe(true);
+
+    expect(hostExecCalls).toContain(
+      `git -C '${join(REPOS_ROOT, "StateOrg/state-repo.wt-feature")}' rev-parse --abbrev-ref HEAD`,
+    );
+    expect(hostExecCalls.join("\n")).not.toContain("LegacyOrg/legacy-repo");
   });
 
   test("returns false after reporting a worktree removal failure", async () => {
@@ -212,6 +244,34 @@ describe("removeFromFleetConfig", () => {
     expect(readFleetConfig("one.json").windows).toEqual([{ name: "Keep", repo: "org/keep" }]);
     expect(readFleetConfig("two.json").windows).toEqual([]);
     return expect(output).resolves.toContain("removed from one.json");
+  });
+
+  test("removes matching windows from state before duplicate legacy configs", () => {
+    const stateFleetDir = join(SANDBOX, "state-fleet-remove");
+    mkdirSync(stateFleetDir, { recursive: true });
+    fleetReadDirs = [stateFleetDir, FLEET_DIR];
+    writeFileSync(
+      join(stateFleetDir, "one.json"),
+      JSON.stringify({
+        windows: [
+          { name: "DonePane", repo: "state/repo.wt-done" },
+          { name: "Keep", repo: "state/repo" },
+        ],
+      }),
+      "utf-8",
+    );
+    writeFleetConfig("one.json", {
+      windows: [{ name: "DonePane", repo: "legacy/repo.wt-done" }],
+    });
+
+    expect(removeFromFleetConfig("donepane")).toBe(true);
+
+    expect(JSON.parse(readFileSync(join(stateFleetDir, "one.json"), "utf-8")).windows).toEqual([
+      { name: "Keep", repo: "state/repo" },
+    ]);
+    expect(readFleetConfig("one.json").windows).toEqual([
+      { name: "DonePane", repo: "legacy/repo.wt-done" },
+    ]);
   });
 
   test("returns false when no fleet config contains the window", () => {

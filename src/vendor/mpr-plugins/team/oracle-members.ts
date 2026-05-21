@@ -1,7 +1,9 @@
 /**
  * oracle-members.ts — persistent oracle member registry for teams (#627 Phase 1).
  *
- * Stores team membership in ~/.config/maw/teams/<team-name>/oracle-members.json.
+ * Stores team membership in maw's XDG state tree:
+ * <state>/teams/<team-name>/oracle-members.json.
+ * Legacy config-tree registries remain readable for migration.
  * Each member is a named oracle (budded from maw bud, or any oracle with a
  * CLAUDE.md + ψ/ vault) that persists across sessions. This is the "oracle-team"
  * paradigm: team members are not ephemeral agents — they have identity, memory,
@@ -14,7 +16,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
-import { CONFIG_DIR } from "maw-js/core/paths";
+import { mawConfigPath, mawStatePath } from "../../../core/xdg";
 
 // ─── Types ───
 
@@ -45,23 +47,36 @@ export interface OracleTeamRegistry {
 // ─── Paths ───
 
 function teamRegistryDir(teamName: string): string {
-  return join(CONFIG_DIR, "teams", teamName);
+  return mawStatePath("teams", teamName);
 }
 
 function teamRegistryPath(teamName: string): string {
   return join(teamRegistryDir(teamName), "oracle-members.json");
 }
 
+function legacyTeamRegistryPath(teamName: string): string {
+  return mawConfigPath("teams", teamName, "oracle-members.json");
+}
+
+function candidateTeamRegistryPaths(teamName: string): string[] {
+  const primary = teamRegistryPath(teamName);
+  const legacy = legacyTeamRegistryPath(teamName);
+  return primary === legacy ? [primary] : [primary, legacy];
+}
+
 // ─── Registry CRUD ───
 
 export function loadOracleRegistry(teamName: string): OracleTeamRegistry | null {
-  const path = teamRegistryPath(teamName);
-  if (!existsSync(path)) return null;
-  try {
-    return JSON.parse(readFileSync(path, "utf-8"));
-  } catch {
-    return null;
+  for (const path of candidateTeamRegistryPaths(teamName)) {
+    if (!existsSync(path)) continue;
+    try {
+      return JSON.parse(readFileSync(path, "utf-8"));
+    } catch {
+      // Keep trying legacy paths; a broken primary should not make older
+      // readable registries invisible during migration.
+    }
   }
+  return null;
 }
 
 function ensureRegistry(teamName: string): OracleTeamRegistry {
@@ -81,7 +96,7 @@ function ensureRegistry(teamName: string): OracleTeamRegistry {
 function saveRegistry(teamName: string, registry: OracleTeamRegistry): void {
   const dir = teamRegistryDir(teamName);
   mkdirSync(dir, { recursive: true });
-  // lgtm[js/file-system-race] — PRIVATE-PATH: registry under ~/.config/maw/teams/, see docs/security/file-system-race-stance.md
+  // lgtm[js/file-system-race] — PRIVATE-PATH: registry under maw state teams/, see docs/security/file-system-race-stance.md
   writeFileSync(teamRegistryPath(teamName), JSON.stringify(registry, null, 2));
 }
 

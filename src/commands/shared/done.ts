@@ -1,9 +1,11 @@
 import { join } from "path";
 import { appendFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "fs";
 import { homedir } from "os";
-import { listSessions, hostExec, tmux, FLEET_DIR, takeSnapshot } from "../../sdk";
+import { listSessions, hostExec, tmux, takeSnapshot } from "../../sdk";
 import { getGhqRoot } from "../../config/ghq-root";
 import { normalizeTarget } from "../../core/matcher/normalize-target";
+import { mawDataPath } from "../../core/xdg";
+import { fleetDirForWrite, fleetDirsForRead, uniqueDirs } from "../../core/fleet/paths";
 
 export interface DoneOpts {
   force?: boolean;
@@ -30,8 +32,10 @@ export interface DoneDeps {
     sendText?: (target: string, text: string) => Promise<unknown>;
   };
   fleetDir?: string;
+  fleetDirs?: string[];
   ghqRoot?: string;
   homeDir?: string;
+  inboxDir?: string;
   takeSnapshot?: (trigger: string) => Promise<unknown>;
   now?: () => Date;
   sleep?: (ms: number) => Promise<void>;
@@ -40,6 +44,7 @@ export interface DoneDeps {
 }
 
 function doneDeps(deps: DoneDeps = {}) {
+  const homeDir = deps.homeDir ?? homedir();
   return {
     listSessions: deps.listSessions ?? (listSessions as () => Promise<SessionInfo[]>),
     hostExec: deps.hostExec ?? hostExec,
@@ -47,9 +52,11 @@ function doneDeps(deps: DoneDeps = {}) {
       killWindow: deps.tmux?.killWindow ?? tmux.killWindow,
       sendText: deps.tmux?.sendText ?? tmux.sendText,
     },
-    fleetDir: deps.fleetDir ?? FLEET_DIR,
+    fleetDir: deps.fleetDir ?? fleetDirForWrite(),
+    fleetDirs: deps.fleetDirs ?? (deps.fleetDir ? [deps.fleetDir] : fleetDirsForRead()),
     ghqRoot: deps.ghqRoot ?? getGhqRoot(),
-    homeDir: deps.homeDir ?? homedir(),
+    homeDir,
+    inboxDir: deps.inboxDir ?? mawDataPath("inbox"),
     takeSnapshot: deps.takeSnapshot ?? takeSnapshot,
     now: deps.now ?? (() => new Date()),
     sleep: deps.sleep ?? Bun.sleep,
@@ -62,6 +69,33 @@ function doneDeps(deps: DoneDeps = {}) {
     },
     logger: deps.logger ?? console,
   };
+}
+
+type ResolvedDoneDeps = ReturnType<typeof doneDeps>;
+
+function activeFleetConfigFiles(d: ResolvedDoneDeps): Array<{ file: string; path: string }> {
+  const filesByName = new Map<string, { file: string; path: string }>();
+  const dirs = uniqueDirs(d.fleetDirs?.length ? d.fleetDirs : [d.fleetDir]);
+  let sawReadableDir = false;
+  let lastError: unknown = null;
+
+  for (const fleetDir of dirs) {
+    let files: string[];
+    try {
+      files = d.fs.readdirSync(fleetDir).filter(f => f.endsWith(".json")).sort();
+      sawReadableDir = true;
+    } catch (error) {
+      lastError = error;
+      continue;
+    }
+
+    for (const file of files) {
+      if (!filesByName.has(file)) filesByName.set(file, { file, path: join(fleetDir, file) });
+    }
+  }
+
+  if (!sawReadableDir && lastError) throw lastError;
+  return [...filesByName.values()].sort((a, b) => a.file.localeCompare(b.file));
 }
 
 export async function cmdDone(windowName_: string, opts: DoneOpts = {}, deps: DoneDeps = {}) {
@@ -128,7 +162,7 @@ export function signalParentInbox(
   const parentWindow = sessions.find(s => s.name === sessionName)?.windows[0]?.name;
   if (!parentWindow) return;
   const parentTarget = parentWindow.replace(/[^a-zA-Z0-9_-]/g, "");
-  const inboxDir = join(d.homeDir, ".oracle", "inbox");
+  const inboxDir = d.inboxDir;
   const signal =
     JSON.stringify({ ts: d.now().toISOString(), from, type: "done", msg: `worktree ${windowName} completed`, thread: null }) + "\n";
   try {
@@ -202,8 +236,11 @@ export async function removeWorktreeViaConfig(
 ): Promise<boolean> {
   const d = doneDeps(deps);
   try {
-    for (const file of d.fs.readdirSync(d.fleetDir).filter(f => f.endsWith(".json"))) {
-      const config = JSON.parse(d.fs.readFileSync(join(d.fleetDir, file), "utf-8"));
+    for (const { file, path } of activeFleetConfigFiles(d)) {
+      let config: any;
+      try {
+        config = JSON.parse(d.fs.readFileSync(path, "utf-8"));
+      } catch { continue; }
       const win = (config.windows || []).find((w: any) => w.name.toLowerCase() === windowNameLower);
       if (!win?.repo) continue;
 
@@ -282,8 +319,7 @@ export function removeFromFleetConfig(windowNameLower: string, deps: DoneDeps = 
   const d = doneDeps(deps);
   let removed = false;
   try {
-    for (const file of d.fs.readdirSync(d.fleetDir).filter(f => f.endsWith(".json"))) {
-      const filePath = join(d.fleetDir, file);
+    for (const { file, path: filePath } of activeFleetConfigFiles(d)) {
       const config = JSON.parse(d.fs.readFileSync(filePath, "utf-8"));
       const before = config.windows?.length || 0;
       config.windows = (config.windows || []).filter((w: any) => w.name.toLowerCase() !== windowNameLower);
