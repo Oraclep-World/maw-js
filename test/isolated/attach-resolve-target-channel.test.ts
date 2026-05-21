@@ -25,6 +25,7 @@ describe("attach resolver channel-session filtering", () => {
         { name: "14-random-oracle-discord", windows: [{ name: "random" }] },
       ],
       loadFleet: () => [],
+      listRemoteSessions: async () => [],
     });
 
     expect(result).toBeNull();
@@ -117,6 +118,7 @@ describe("attach resolver channel-session filtering", () => {
       loadFleet: () => [
         { name: "Somwind-oracle", windows: [{ name: "main" }] },
       ],
+      listRemoteSessions: async () => [],
     });
 
     expect(result).toBeNull();
@@ -304,5 +306,106 @@ describe("attach resolver channel-session filtering", () => {
       ambiguousCandidates: ["50-custom-admin", "51-custom-backup"],
     });
   });
+
+  test("bare attach can opt into federation after local and fleet misses", async () => {
+    let remoteLookups = 0;
+    const result = await resolveAttachTarget("volt", {
+      listSessions: async () => [],
+      loadFleet: () => [],
+      listRemoteSessions: async () => {
+        remoteLookups++;
+        return [{
+          alias: "alpha",
+          node: "white",
+          url: "http://white.wg:3461",
+          sessions: [{ name: "05-volt-oracle", windows: [{ name: "volt-oracle" }] }],
+        }];
+      },
+    }, { federation: true });
+
+    expect(remoteLookups).toBe(1);
+    expect(result).toEqual({
+      tier: 3,
+      node: "alpha",
+      sessionName: "05-volt-oracle",
+      peerUrl: "http://white.wg:3461",
+      sshAlias: "alpha@white.wg",
+    });
+  });
+
+  test("federation precheck prefers an exact remote session over fuzzy ambiguity", async () => {
+    const result = await resolveAttachTarget("volt", {
+      listSessions: async () => [],
+      loadFleet: () => [],
+      listRemoteSessions: async () => [
+        {
+          alias: "alpha",
+          node: "white",
+          url: "http://white.wg:3461",
+          sessions: [{ name: "volt", windows: [{ name: "main" }] }],
+        },
+        {
+          alias: "beta",
+          node: "white",
+          url: "http://white.wg:3462",
+          sessions: [{ name: "05-volt-oracle", windows: [{ name: "main" }] }],
+        },
+      ],
+    }, { federation: true });
+
+    expect(result).toEqual({
+      tier: 3,
+      node: "alpha",
+      sessionName: "volt",
+      peerUrl: "http://white.wg:3461",
+      sshAlias: "alpha@white.wg",
+    });
+  });
+
+  test("federation precheck reports ambiguous remote candidates", async () => {
+    const result = await resolveAttachTarget("volt", {
+      listSessions: async () => [],
+      loadFleet: () => [],
+      listRemoteSessions: async () => [
+        {
+          alias: "alpha",
+          node: "white",
+          url: "http://white.wg:3461",
+          sessions: [{ name: "05-volt-oracle", windows: [{ name: "main" }] }],
+        },
+        {
+          alias: "beta",
+          node: "white",
+          url: "http://white.wg:3462",
+          sessions: [{ name: "07-volt-lab", windows: [{ name: "main" }] }],
+        },
+      ],
+    }, { federation: true });
+
+    expect(result).toEqual({
+      tier: 3,
+      node: "alpha",
+      sessionName: "05-volt-oracle",
+      peerUrl: "http://white.wg:3461",
+      sshAlias: "alpha@white.wg",
+      ambiguousCandidates: ["alpha:05-volt-oracle", "beta:07-volt-lab"],
+    });
+  });
+
+  test("local sleeping fleet matches skip the federation precheck", async () => {
+    let remoteLookups = 0;
+    const result = await resolveAttachTarget("volt", {
+      listSessions: async () => [],
+      loadFleet: () => [{ name: "volt-oracle", windows: [{ name: "main" }] }],
+      listRemoteSessions: async () => {
+        remoteLookups++;
+        return [{ alias: "alpha", node: "white", url: "http://white.wg:3461", sessions: [] }];
+      },
+    }, { federation: true });
+
+    expect(remoteLookups).toBe(0);
+    expect(result).toEqual({ tier: 2, fleetName: "volt-oracle" });
+  });
+
 
 });

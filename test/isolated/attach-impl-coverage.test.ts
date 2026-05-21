@@ -19,7 +19,7 @@ type ResolveResult =
 
 type ResolveCall = {
   target: string;
-  opts: { fuzzy?: boolean };
+  opts: { fuzzy?: boolean; federation?: boolean };
   depsUseMockedListSessions: boolean;
   depsUseMockedLoadFleet: boolean;
 };
@@ -147,12 +147,12 @@ describe("attach impl command routing", () => {
 
     await cmdAttach("ghost", { dryRun: true });
 
-    expect(logs.join("\n")).toContain("[dry-run] 'ghost' not local");
+    expect(logs.join("\n")).toContain("[dry-run] 'ghost' not local or federated");
     expect(spawnCalls).toEqual([]);
     expect(resolveCalls).toEqual([
       {
         target: "ghost",
-        opts: {},
+        opts: { federation: true },
         depsUseMockedListSessions: true,
         depsUseMockedLoadFleet: true,
       },
@@ -167,10 +167,10 @@ describe("attach impl command routing", () => {
     expect(spawnCalls).toEqual([["maw", "wake", "wind"]]);
     expect(tmuxAttachCalls).toEqual(["01-Somwind"]);
     expect(resolveCalls.map((call) => ({ target: call.target, opts: call.opts }))).toEqual([
-      { target: "wind", opts: {} },
+      { target: "wind", opts: { federation: true } },
       { target: "wind", opts: { fuzzy: true } },
     ]);
-    expect(logs.join("\n")).toContain("'wind' not local");
+    expect(logs.join("\n")).toContain("'wind' not local or federated");
     expect(logs.join("\n")).toContain("attaching to 01-Somwind");
   });
 
@@ -385,7 +385,7 @@ describe("attach impl command routing", () => {
     await cmdAttach("mawjs-oracle", { shell: true });
 
     expect(resolveCalls).toEqual([
-      expect.objectContaining({ target: "mawjs-oracle", opts: {} }),
+      expect.objectContaining({ target: "mawjs-oracle", opts: { federation: true } }),
       expect.objectContaining({ target: "mawjs-oracle", opts: { fuzzy: true } }),
     ]);
     expect(spawnCalls).toEqual([

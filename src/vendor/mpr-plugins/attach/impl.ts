@@ -5,9 +5,10 @@
  *   Tier 2 (sleeping): prompt → `maw wake <fleet-name>` → attach
  *   no match:          error + list of available oracles
  *
- * Cross-node attach is explicit-only (#1876): `maw attach <node>:<session>`
- * resolves a configured peer and hands off to attach-ssh. Bare attach stays
- * local-only and never scans federation peers implicitly.
+ * Cross-node attach has two paths:
+ *   - explicit `maw attach <node>:<session>` (#1876)
+ *   - implicit bounded federation precheck after local misses, before wake/scan (#1878)
+ * Both hand off to attach-ssh.
  */
 import { listSessions } from "maw-js/sdk";
 import { loadFleet } from "maw-js/commands/shared/fleet-load";
@@ -65,7 +66,7 @@ export async function cmdAttach(name: string, opts: AttachOpts = {}): Promise<vo
   }
 
   const deps = { listSessions, loadFleet };
-  const result: ResolveResult = await resolveAttachTarget(name, deps);
+  const result: ResolveResult = await resolveAttachTarget(name, deps, { federation: true });
 
   if (!result) {
     // Local Tier 1+2 missed. Delegate to wake — it runs the full chain:
@@ -75,10 +76,10 @@ export async function cmdAttach(name: string, opts: AttachOpts = {}): Promise<vo
     // See ψ/memory/traces/2026-05-13/1203_attach-find-or-scan-flow.md
     if (opts.dryRun) {
       const action = opts.shell ? "open shell" : "attach";
-      console.log(`  \x1b[36m·\x1b[0m [dry-run] '${name}' not local — would: maw wake ${name} → re-resolve → ${action}`);
+      console.log(`  \x1b[36m·\x1b[0m [dry-run] '${name}' not local or federated — would: maw wake ${name} → re-resolve → ${action}`);
       return;
     }
-    console.log(`  \x1b[36m·\x1b[0m '${name}' not local — delegating to wake`);
+    console.log(`  \x1b[36m·\x1b[0m '${name}' not local or federated — delegating to wake`);
     await spawnMaw(["wake", name]);
     // Wake created the session. Re-resolve — should hit Tier 1 now.
     //
@@ -114,7 +115,8 @@ export async function cmdAttach(name: string, opts: AttachOpts = {}): Promise<vo
   if ("ambiguousCandidates" in result && result.ambiguousCandidates && result.ambiguousCandidates.length > 1) {
     console.error(`\x1b[33m⚠\x1b[0m '${name}' is ambiguous — ${result.ambiguousCandidates.length} matches:`);
     for (const c of result.ambiguousCandidates) console.error(`    • ${c}`);
-    console.error(`  use the full name: \x1b[36mmaw attach <exact-name>\x1b[0m`);
+    const hint = result.tier === 3 ? "maw attach <node>:<exact-name>" : "maw attach <exact-name>";
+    console.error(`  use the full name: \x1b[36m${hint}\x1b[0m`);
     throw new Error(`ambiguous: ${name}`);
   }
 

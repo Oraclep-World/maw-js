@@ -206,7 +206,7 @@ function nodeMatches(payload: Pick<LsNodePayload, "alias" | "node" | "url">, fil
     .some((value) => typeof value === "string" && value.toLowerCase().includes(q));
 }
 
-async function fetchPeerPayload(peer: { alias: string; url: string; node: string | null }, timeoutMs: number): Promise<LsNodePayload> {
+export async function fetchPeerPayload(peer: { alias: string; url: string; node: string | null }, timeoutMs: number): Promise<LsNodePayload> {
   try {
     const res = await fetchPeerSessions(peer.url, timeoutMs);
     const error = responseError(res, peer.alias, peer.url);

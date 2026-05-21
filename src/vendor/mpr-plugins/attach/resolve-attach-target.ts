@@ -12,10 +12,10 @@ import { resolvePeer as resolveConfiguredPeer } from "../ls/internal/peer-resolv
  *                      → prompt to wake, then attach
  *   null               → nothing matched: caller emits "available oracles" hint
  *
- * Tier 3 (explicit cross-node attach, #1876): `maw a <node>:<session>`
- * resolves a configured peer and hands off to the attach-ssh strategy. This is
- * intentionally explicit-only: bare `maw a <session>` remains local Tier 1/2 +
- * wake and never scans the federation implicitly.
+ * Tier 3 (cross-node attach): explicit `maw a <node>:<session>` resolves a
+ * configured peer directly (#1876). Bare `maw a <session>` may also opt into a
+ * bounded federation precheck after local Tier 1/2 misses and before wake/scan
+ * (#1878), then hands the remote-live match to the same attach-ssh strategy.
  *
  * Deps are injected for testability — same shape as the sleep resolver.
  */
@@ -39,10 +39,16 @@ export interface RemotePeerLike {
   sshUser?: string;
 }
 
+export interface RemoteSessionNodeLike extends RemotePeerLike {
+  sessions: SessionLike[];
+  error?: string;
+}
+
 export interface ResolveDeps {
   listSessions: () => Promise<SessionLike[]>;
   loadFleet: () => FleetLike[];
   resolvePeer?: (alias: string) => RemotePeerLike | null | Promise<RemotePeerLike | null>;
+  listRemoteSessions?: () => Promise<RemoteSessionNodeLike[]>;
 }
 
 export type ResolveResult =
@@ -53,7 +59,7 @@ export type ResolveResult =
       ambiguousCandidates?: string[];
     }
   | { tier: 2; fleetName: string; ambiguousCandidates?: string[] }
-  | { tier: 3; sessionName: string; node: string; peerUrl: string; sshAlias: string }
+  | { tier: 3; sessionName: string; node: string; peerUrl: string; sshAlias: string; ambiguousCandidates?: string[] }
   | { tier: "error"; error: string; hint?: string }
   | null;
 
@@ -158,10 +164,69 @@ function runningMatchFor(session: SessionLike, target: string, fuzzy: boolean): 
   return null;
 }
 
+async function listFederatedRemoteSessions(): Promise<RemoteSessionNodeLike[]> {
+  const [{ resolveAllPeers }, { fetchPeerPayload }] = await Promise.all([
+    import("../ls/internal/peer-resolve"),
+    import("../ls/internal/peer-call"),
+  ]);
+  const peers = resolveAllPeers();
+  return await Promise.all(peers.map(async (peer) => {
+    const payload = await fetchPeerPayload(peer, 2000);
+    return {
+      ...peer,
+      // Keep the configured peer alias for attach routing/ssh derivation even
+      // when the remote /api/ls payload identifies itself by a different node.
+      alias: peer.alias,
+      node: payload.node ?? peer.node,
+      url: peer.url,
+      sessions: payload.error ? [] : (payload.sessions ?? []),
+      ...(payload.error ? { error: payload.error } : {}),
+    };
+  }));
+}
+
+function tier3Result(node: RemoteSessionNodeLike, sessionName: string, ambiguousCandidates?: string[]): Extract<ResolveResult, { tier: 3 }> {
+  const alias = node.alias;
+  return {
+    tier: 3,
+    node: alias,
+    sessionName,
+    peerUrl: node.url,
+    sshAlias: deriveSshAlias(node, alias),
+    ...(ambiguousCandidates && ambiguousCandidates.length > 1 ? { ambiguousCandidates } : {}),
+  };
+}
+
+async function remoteMatchFor(target: string, deps: ResolveDeps): Promise<Extract<ResolveResult, { tier: 3 }> | null> {
+  const nodes = await (deps.listRemoteSessions ?? listFederatedRemoteSessions)();
+  const matches: Array<{ node: RemoteSessionNodeLike; session: SessionLike }> = [];
+
+  for (const node of nodes) {
+    if (node.error) continue;
+    for (const session of node.sessions || []) {
+      if (isInfrastructureChannelSessionName(session.name, target)) continue;
+      if (runningMatchFor(session, target, true)) matches.push({ node, session });
+    }
+  }
+
+  if (matches.length === 0) return null;
+  if (matches.length === 1) return tier3Result(matches[0].node, matches[0].session.name);
+
+  const exactSessionMatches = matches.filter(
+    match => match.session.name.toLowerCase() === target.toLowerCase(),
+  );
+  if (exactSessionMatches.length === 1) {
+    return tier3Result(exactSessionMatches[0].node, exactSessionMatches[0].session.name);
+  }
+
+  const candidates = matches.map(match => `${match.node.alias}:${match.session.name}`);
+  return tier3Result(matches[0].node, matches[0].session.name, candidates);
+}
+
 export async function resolveAttachTarget(
   target: string,
   deps: ResolveDeps,
-  opts: { fuzzy?: boolean } = {},
+  opts: { fuzzy?: boolean; federation?: boolean } = {},
 ): Promise<ResolveResult> {
   const explicitPeerTarget = parseExplicitPeerAttachTarget(target);
   if (explicitPeerTarget && "error" in explicitPeerTarget) {
@@ -249,6 +314,14 @@ export async function resolveAttachTarget(
       fleetName: fleetMatches[0].name,
       ambiguousCandidates: fleetMatches.map(f => f.name),
     };
+  }
+
+  // Tier 3 — optional federation precheck before the caller falls through to
+  // `maw wake`, whose final fallback can run slow GitHub/org scans (#1878).
+  // Other resolver consumers (capture/follow) stay local-only unless they opt in.
+  if (opts.federation) {
+    const remote = await remoteMatchFor(target, deps);
+    if (remote) return remote;
   }
 
   return null;
