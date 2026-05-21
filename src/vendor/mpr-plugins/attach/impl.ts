@@ -16,7 +16,6 @@ import { cmdTmuxAttach } from "../../../commands/plugins/tmux/impl";
 import { isClaudeLikePane } from "../../../commands/plugins/tmux/safety";
 import { UserError } from "../../../core/util/user-error";
 import { join } from "path";
-import attachSsh from "../attach-ssh/index";
 import {
   resolveAttachTarget,
   type ResolveResult,
@@ -130,7 +129,7 @@ export async function cmdAttach(name: string, opts: AttachOpts = {}): Promise<vo
       return;
     }
     console.log(`  \x1b[32m→\x1b[0m attaching to ${result.node}:${result.sessionName} via ssh ${result.sshAlias}`);
-    await attachSsh.execute(result);
+    await executeRemoteAttach(result);
     return;
   }
 
@@ -258,6 +257,11 @@ async function isClaudeLikeCaller(): Promise<boolean> {
  */
 async function attachToSession(sessionName: string): Promise<void> {
   cmdTmuxAttach(sessionName);
+}
+
+async function executeRemoteAttach(target: Extract<ResolveResult, { tier: 3 }>): Promise<void> {
+  const attachSsh = await import("../attach-ssh/index");
+  await attachSsh.default.execute(target);
 }
 
 /**
