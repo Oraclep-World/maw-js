@@ -318,6 +318,8 @@ describe("doctor impl runtime coverage", () => {
     };
     try {
       process.env.MAW_HOME = join(root, "instance");
+      process.env.HOME = join(root, "home-for-maw-home");
+      mkdirSync(process.env.HOME, { recursive: true });
       delete process.env.MAW_CONFIG_DIR;
       delete process.env.MAW_STATE_DIR;
       delete process.env.MAW_DATA_DIR;
