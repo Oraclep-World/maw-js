@@ -39,7 +39,17 @@ function readablePeersPath(): string {
   return legacy && existsSync(legacy) ? legacy : primary;
 }
 
-function readPeers(): Record<string, { url?: string; node?: string; sshAlias?: string; ssh?: string; sshHost?: string; sshUser?: string; user?: string }> | null {
+type RawPeer = {
+  url?: string;
+  node?: string;
+  sshAlias?: string;
+  ssh?: string | { alias?: string; target?: string; host?: string; user?: string };
+  sshHost?: string;
+  sshUser?: string;
+  user?: string;
+};
+
+function readPeers(): Record<string, RawPeer> | null {
   const path = readablePeersPath();
   if (!existsSync(path)) return null;
   try {
@@ -50,20 +60,48 @@ function readPeers(): Record<string, { url?: string; node?: string; sshAlias?: s
   }
 }
 
+function sshAliasFrom(peer: RawPeer): string | undefined {
+  if (typeof peer.sshAlias === "string" && peer.sshAlias.trim()) return peer.sshAlias.trim();
+  if (typeof peer.ssh === "string" && peer.ssh.trim()) return peer.ssh.trim();
+  if (peer.ssh && typeof peer.ssh === "object") {
+    const target = peer.ssh.target ?? peer.ssh.alias;
+    if (typeof target === "string" && target.trim()) return target.trim();
+  }
+  return undefined;
+}
+
+function sshHostFrom(peer: RawPeer): string | undefined {
+  if (typeof peer.sshHost === "string" && peer.sshHost.trim()) return peer.sshHost.trim();
+  if (peer.ssh && typeof peer.ssh === "object" && typeof peer.ssh.host === "string" && peer.ssh.host.trim()) {
+    return peer.ssh.host.trim();
+  }
+  return undefined;
+}
+
+function sshUserFrom(peer: RawPeer): string | undefined {
+  if (typeof peer.sshUser === "string" && peer.sshUser.trim()) return peer.sshUser.trim();
+  if (typeof peer.user === "string" && peer.user.trim()) return peer.user.trim();
+  if (peer.ssh && typeof peer.ssh === "object" && typeof peer.ssh.user === "string" && peer.ssh.user.trim()) {
+    return peer.ssh.user.trim();
+  }
+  return undefined;
+}
+
 export function resolvePeer(alias: string): ResolvedPeer | null {
   const peers = readPeers();
   if (!peers) return null;
   const peer = peers[alias];
   if (!peer || typeof peer.url !== "string") return null;
+  const sshAlias = sshAliasFrom(peer);
+  const sshHost = sshHostFrom(peer);
+  const sshUser = sshUserFrom(peer);
   return {
     alias,
     url: peer.url,
     node: typeof peer.node === "string" ? peer.node : null,
-    ...(typeof peer.sshAlias === "string" && peer.sshAlias.trim() ? { sshAlias: peer.sshAlias.trim() } : {}),
-    ...(typeof peer.ssh === "string" && peer.ssh.trim() ? { sshAlias: peer.ssh.trim() } : {}),
-    ...(typeof peer.sshHost === "string" && peer.sshHost.trim() ? { sshHost: peer.sshHost.trim() } : {}),
-    ...(typeof peer.sshUser === "string" && peer.sshUser.trim() ? { sshUser: peer.sshUser.trim() } : {}),
-    ...(typeof peer.user === "string" && peer.user.trim() ? { sshUser: peer.user.trim() } : {}),
+    ...(sshAlias ? { sshAlias } : {}),
+    ...(sshHost ? { sshHost } : {}),
+    ...(sshUser ? { sshUser } : {}),
   };
 }
 
@@ -72,14 +110,17 @@ export function resolveAllPeers(): ResolvedPeer[] {
   if (!peers) return [];
   return Object.entries(peers)
     .filter(([, v]) => v && typeof v.url === "string")
-    .map(([alias, v]) => ({
-      alias,
-      url: v.url as string,
-      node: typeof v.node === "string" ? v.node : null,
-      ...(typeof v.sshAlias === "string" && v.sshAlias.trim() ? { sshAlias: v.sshAlias.trim() } : {}),
-      ...(typeof v.ssh === "string" && v.ssh.trim() ? { sshAlias: v.ssh.trim() } : {}),
-      ...(typeof v.sshHost === "string" && v.sshHost.trim() ? { sshHost: v.sshHost.trim() } : {}),
-      ...(typeof v.sshUser === "string" && v.sshUser.trim() ? { sshUser: v.sshUser.trim() } : {}),
-      ...(typeof v.user === "string" && v.user.trim() ? { sshUser: v.user.trim() } : {}),
-    }));
+    .map(([alias, v]) => {
+      const sshAlias = sshAliasFrom(v);
+      const sshHost = sshHostFrom(v);
+      const sshUser = sshUserFrom(v);
+      return {
+        alias,
+        url: v.url as string,
+        node: typeof v.node === "string" ? v.node : null,
+        ...(sshAlias ? { sshAlias } : {}),
+        ...(sshHost ? { sshHost } : {}),
+        ...(sshUser ? { sshUser } : {}),
+      };
+    });
 }

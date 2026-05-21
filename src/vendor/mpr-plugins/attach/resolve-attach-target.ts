@@ -1,6 +1,9 @@
 import { isInfrastructureChannelSessionName } from "../../../core/matcher/channel-session";
 import { resolveFleetWindowSessionTarget } from "../../../core/matcher/resolve-target";
 import { resolvePeer as resolveConfiguredPeer } from "../ls/internal/peer-resolve";
+import { existsSync, readFileSync } from "fs";
+import { homedir } from "os";
+import { join } from "path";
 
 /**
  * Resolve a `maw attach <target>` invocation into a tiered match.
@@ -91,19 +94,108 @@ function parseExplicitPeerAttachTarget(target: string): { node: string; sessionN
   return { node: left, sessionName: right };
 }
 
+function withSshUser(target: string, user?: string): string {
+  const trimmed = target.trim();
+  const sshUser = user?.trim();
+  if (!trimmed || !sshUser || trimmed.includes("@")) return trimmed;
+  return `${sshUser}@${trimmed}`;
+}
+
+function peerUrlHost(peer: RemotePeerLike): { host: string; user: string } {
+  try {
+    const url = new URL(peer.url);
+    return { host: url.hostname || peer.url, user: url.username };
+  } catch {
+    return {
+      host: peer.url.replace(/^https?:\/\//, "").replace(/\/.*$/, "").replace(/:\d+$/, ""),
+      user: "",
+    };
+  }
+}
+
+interface SshConfigBlock {
+  aliases: string[];
+  hostName?: string;
+}
+
+function sshConfigPath(): string {
+  return process.env.SSH_CONFIG_FILE || join(process.env.HOME || homedir(), ".ssh", "config");
+}
+
+function readSshConfigBlocks(): SshConfigBlock[] {
+  const path = sshConfigPath();
+  if (!existsSync(path)) return [];
+
+  const blocks: SshConfigBlock[] = [];
+  let current: SshConfigBlock | null = null;
+  let rawConfig = "";
+  try {
+    rawConfig = readFileSync(path, "utf8");
+  } catch {
+    return [];
+  }
+  for (const rawLine of rawConfig.split(/\r?\n/)) {
+    const line = rawLine.replace(/\s+#.*$/, "").trim();
+    if (!line || line.startsWith("#")) continue;
+    const match = line.match(/^(\S+)\s+(.+)$/);
+    if (!match) continue;
+    const key = match[1].toLowerCase();
+    const value = match[2].trim();
+
+    if (key === "host") {
+      current = {
+        aliases: value.split(/\s+/).filter(alias => alias && !/[?*]/.test(alias)),
+      };
+      if (current.aliases.length > 0) blocks.push(current);
+      continue;
+    }
+
+    if (current && key === "hostname") {
+      current.hostName = value;
+    }
+  }
+
+  return blocks;
+}
+
+function firstSshConfigAlias(peer: RemotePeerLike, nodeAlias: string, rawHost: string): string | null {
+  const blocks = readSshConfigBlocks();
+  const candidates = new Set(
+    [nodeAlias, peer.alias, peer.node ?? "", rawHost]
+      .map(s => s.trim().toLowerCase())
+      .filter(Boolean),
+  );
+
+  for (const block of blocks) {
+    const aliasMatch = block.aliases.find(alias => candidates.has(alias.toLowerCase()));
+    if (aliasMatch) return aliasMatch;
+  }
+
+  const rawHostLower = rawHost.trim().toLowerCase();
+  if (!rawHostLower) return null;
+  for (const block of blocks) {
+    if (block.hostName?.trim().toLowerCase() === rawHostLower) {
+      return block.aliases[0] ?? null;
+    }
+  }
+
+  return null;
+}
+
 function deriveSshAlias(peer: RemotePeerLike, nodeAlias: string): string {
-  if (peer.sshAlias?.trim()) return peer.sshAlias.trim();
+  const explicitUser = peer.sshUser?.trim() || "";
+  const explicitAlias = peer.sshAlias?.trim();
+  if (explicitAlias) return withSshUser(explicitAlias, explicitUser);
+
+  const parsedUrl = peerUrlHost(peer);
+  const configAlias = firstSshConfigAlias(peer, nodeAlias, parsedUrl.host);
+  if (configAlias) return withSshUser(configAlias, explicitUser);
 
   let host = peer.sshHost?.trim() || "";
-  let user = peer.sshUser?.trim() || "";
+  let user = explicitUser;
   if (!host) {
-    try {
-      const url = new URL(peer.url);
-      host = url.hostname || peer.url;
-      user = user || url.username;
-    } catch {
-      host = peer.url.replace(/^https?:\/\//, "").replace(/\/.*$/, "").replace(/:\d+$/, "");
-    }
+    host = parsedUrl.host;
+    user = user || parsedUrl.user;
   }
 
   if (!user && peer.node && peer.node !== nodeAlias) user = nodeAlias;

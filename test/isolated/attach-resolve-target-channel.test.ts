@@ -1,6 +1,20 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 
 const { resolveAttachTarget } = await import("../../src/vendor/mpr-plugins/attach/resolve-attach-target.ts?channel-regression");
+
+const originalSshConfigFile = process.env.SSH_CONFIG_FILE;
+
+beforeEach(() => {
+  process.env.SSH_CONFIG_FILE = join(tmpdir(), "maw-empty-ssh-config-does-not-exist");
+});
+
+afterEach(() => {
+  if (originalSshConfigFile === undefined) delete process.env.SSH_CONFIG_FILE;
+  else process.env.SSH_CONFIG_FILE = originalSshConfigFile;
+});
 
 describe("attach resolver channel-session filtering", () => {
   test("filters discord channel helper sessions so the oracle admin session wins", async () => {
@@ -176,6 +190,104 @@ describe("attach resolver channel-session filtering", () => {
       peerUrl: "http://white.wg:3461",
       sshAlias: "alpha@white.wg",
     });
+  });
+
+  test("uses configured peer ssh target before raw URL fallback and applies ssh user override", async () => {
+    const result = await resolveAttachTarget("oracle-world:volt-oracle", {
+      listSessions: async () => [],
+      loadFleet: () => [],
+      resolvePeer: async (alias: string) => ({
+        alias,
+        url: "http://10.20.0.16:3456",
+        node: "oracle-world",
+        sshAlias: "oracle-world",
+        sshUser: "sila",
+      }),
+    });
+
+    expect(result).toEqual({
+      tier: 3,
+      node: "oracle-world",
+      sessionName: "volt-oracle",
+      peerUrl: "http://10.20.0.16:3456",
+      sshAlias: "sila@oracle-world",
+    });
+  });
+
+  test("keeps a full configured ssh target intact when ssh user is also present", async () => {
+    const result = await resolveAttachTarget("oracle-world:volt-oracle", {
+      listSessions: async () => [],
+      loadFleet: () => [],
+      resolvePeer: async (alias: string) => ({
+        alias,
+        url: "http://10.20.0.16:3456",
+        node: "oracle-world",
+        sshAlias: "nat@oracle-world",
+        sshUser: "sila",
+      }),
+    });
+
+    expect(result).toEqual({
+      tier: 3,
+      node: "oracle-world",
+      sessionName: "volt-oracle",
+      peerUrl: "http://10.20.0.16:3456",
+      sshAlias: "nat@oracle-world",
+    });
+  });
+
+  test("uses ssh config host aliases before raw peer IP fallback", async () => {
+    const previousSshConfig = process.env.SSH_CONFIG_FILE;
+    const tempDir = mkdtempSync(join(tmpdir(), "maw-ssh-config-"));
+    const configPath = join(tempDir, "config");
+    writeFileSync(configPath, [
+      "Host oracle-world",
+      "  HostName floodboy-white4.alchemycat.org",
+      "Host white-tunnel",
+      "  HostName 10.20.0.16",
+    ].join("\n"));
+    process.env.SSH_CONFIG_FILE = configPath;
+
+    try {
+      const byPeerName = await resolveAttachTarget("oracle-world:volt-oracle", {
+        listSessions: async () => [],
+        loadFleet: () => [],
+        resolvePeer: async (alias: string) => ({
+          alias,
+          url: "http://10.20.0.16:3456",
+          node: "oracle-world",
+        }),
+      });
+      expect(byPeerName).toEqual({
+        tier: 3,
+        node: "oracle-world",
+        sessionName: "volt-oracle",
+        peerUrl: "http://10.20.0.16:3456",
+        sshAlias: "oracle-world",
+      });
+
+      const byHostName = await resolveAttachTarget("alpha:volt-oracle", {
+        listSessions: async () => [],
+        loadFleet: () => [],
+        resolvePeer: async (alias: string) => ({
+          alias,
+          url: "http://10.20.0.16:3456",
+          node: "white",
+          sshUser: "sila",
+        }),
+      });
+      expect(byHostName).toEqual({
+        tier: 3,
+        node: "alpha",
+        sessionName: "volt-oracle",
+        peerUrl: "http://10.20.0.16:3456",
+        sshAlias: "sila@white-tunnel",
+      });
+    } finally {
+      if (previousSshConfig === undefined) delete process.env.SSH_CONFIG_FILE;
+      else process.env.SSH_CONFIG_FILE = previousSshConfig;
+      rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 
   test("reports unknown explicit remote peers instead of falling back locally", async () => {
