@@ -5,16 +5,18 @@
  *   Tier 2 (sleeping): prompt → `maw wake <fleet-name>` → attach
  *   no match:          error + list of available oracles
  *
- * Cross-node attach (Tier 3) used to live here. It was pulled back out —
- * the built-in stays local-only. Federation lives in the `attach-ssh`
- * plugin (registry). Install it if you want cross-node attach.
+ * Cross-node attach is explicit-only (#1876): `maw attach <node>:<session>`
+ * resolves a configured peer and hands off to attach-ssh. Bare attach stays
+ * local-only and never scans federation peers implicitly.
  */
 import { listSessions } from "maw-js/sdk";
 import { loadFleet } from "maw-js/commands/shared/fleet-load";
 import { getGhqRoot } from "maw-js/config/ghq-root";
 import { cmdTmuxAttach } from "../../../commands/plugins/tmux/impl";
 import { isClaudeLikePane } from "../../../commands/plugins/tmux/safety";
+import { UserError } from "../../../core/util/user-error";
 import { join } from "path";
+import attachSsh from "../attach-ssh/index";
 import {
   resolveAttachTarget,
   type ResolveResult,
@@ -103,12 +105,33 @@ export async function cmdAttach(name: string, opts: AttachOpts = {}): Promise<vo
     throw new Error(`wake did not create a session for '${name}'`);
   }
 
+  if (result.tier === "error") {
+    console.error(`\x1b[31m✗\x1b[0m ${result.error}`);
+    if (result.hint) console.error(`  ${result.hint}`);
+    throw new UserError(result.error);
+  }
+
   // Ambiguous match: list candidates, stop. User picks one and re-runs.
-  if (result.ambiguousCandidates && result.ambiguousCandidates.length > 1) {
+  if ("ambiguousCandidates" in result && result.ambiguousCandidates && result.ambiguousCandidates.length > 1) {
     console.error(`\x1b[33m⚠\x1b[0m '${name}' is ambiguous — ${result.ambiguousCandidates.length} matches:`);
     for (const c of result.ambiguousCandidates) console.error(`    • ${c}`);
     console.error(`  use the full name: \x1b[36mmaw attach <exact-name>\x1b[0m`);
     throw new Error(`ambiguous: ${name}`);
+  }
+
+  if (result.tier === 3) {
+    if (opts.shell) {
+      const message = "remote attach does not support --shell; use maw attach <node>:<session>";
+      console.error(`\x1b[31m✗\x1b[0m ${message}`);
+      throw new UserError(message);
+    }
+    if (opts.dryRun) {
+      console.log(`  \x1b[36m·\x1b[0m [dry-run] Tier 3 (remote) — would attach to ${result.node}:${result.sessionName} via ssh ${result.sshAlias}`);
+      return;
+    }
+    console.log(`  \x1b[32m→\x1b[0m attaching to ${result.node}:${result.sessionName} via ssh ${result.sshAlias}`);
+    await attachSsh.execute(result);
+    return;
   }
 
   if (result.tier === 1) {

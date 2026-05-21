@@ -17,6 +17,9 @@ export interface ResolvedPeer {
   alias: string;
   url: string;
   node: string | null;
+  sshAlias?: string;
+  sshHost?: string;
+  sshUser?: string;
 }
 
 function peersPath(): string {
@@ -36,7 +39,7 @@ function readablePeersPath(): string {
   return legacy && existsSync(legacy) ? legacy : primary;
 }
 
-function readPeers(): Record<string, { url?: string; node?: string }> | null {
+function readPeers(): Record<string, { url?: string; node?: string; sshAlias?: string; ssh?: string; sshHost?: string; sshUser?: string; user?: string }> | null {
   const path = readablePeersPath();
   if (!existsSync(path)) return null;
   try {
@@ -52,7 +55,16 @@ export function resolvePeer(alias: string): ResolvedPeer | null {
   if (!peers) return null;
   const peer = peers[alias];
   if (!peer || typeof peer.url !== "string") return null;
-  return { alias, url: peer.url, node: typeof peer.node === "string" ? peer.node : null };
+  return {
+    alias,
+    url: peer.url,
+    node: typeof peer.node === "string" ? peer.node : null,
+    ...(typeof peer.sshAlias === "string" && peer.sshAlias.trim() ? { sshAlias: peer.sshAlias.trim() } : {}),
+    ...(typeof peer.ssh === "string" && peer.ssh.trim() ? { sshAlias: peer.ssh.trim() } : {}),
+    ...(typeof peer.sshHost === "string" && peer.sshHost.trim() ? { sshHost: peer.sshHost.trim() } : {}),
+    ...(typeof peer.sshUser === "string" && peer.sshUser.trim() ? { sshUser: peer.sshUser.trim() } : {}),
+    ...(typeof peer.user === "string" && peer.user.trim() ? { sshUser: peer.user.trim() } : {}),
+  };
 }
 
 export function resolveAllPeers(): ResolvedPeer[] {
@@ -64,5 +76,10 @@ export function resolveAllPeers(): ResolvedPeer[] {
       alias,
       url: v.url as string,
       node: typeof v.node === "string" ? v.node : null,
+      ...(typeof v.sshAlias === "string" && v.sshAlias.trim() ? { sshAlias: v.sshAlias.trim() } : {}),
+      ...(typeof v.ssh === "string" && v.ssh.trim() ? { sshAlias: v.ssh.trim() } : {}),
+      ...(typeof v.sshHost === "string" && v.sshHost.trim() ? { sshHost: v.sshHost.trim() } : {}),
+      ...(typeof v.sshUser === "string" && v.sshUser.trim() ? { sshUser: v.sshUser.trim() } : {}),
+      ...(typeof v.user === "string" && v.user.trim() ? { sshUser: v.user.trim() } : {}),
     }));
 }

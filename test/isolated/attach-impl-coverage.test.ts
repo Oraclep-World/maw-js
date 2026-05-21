@@ -13,6 +13,8 @@ const attachRoot = join(import.meta.dir, "../../src/vendor/mpr-plugins/attach");
 type ResolveResult =
   | { tier: 1; sessionName: string; ambiguousCandidates?: string[] }
   | { tier: 2; fleetName: string; ambiguousCandidates?: string[] }
+  | { tier: 3; sessionName: string; node: string; peerUrl: string; sshAlias: string }
+  | { tier: "error"; error: string; hint?: string }
   | null;
 
 type ResolveCall = {
@@ -32,6 +34,7 @@ let spawnStdout = "";
 let spawnThrowsOnPipe = false;
 let tmuxAttachCalls: string[] = [];
 let tmuxAttachError: Error | null = null;
+let attachSshCalls: unknown[] = [];
 let logs: string[] = [];
 let errors: string[] = [];
 
@@ -57,6 +60,14 @@ mock.module(import.meta.resolve("../../src/commands/plugins/tmux/impl"), () => (
   cmdTmuxAttach: (target: string) => {
     tmuxAttachCalls.push(target);
     if (tmuxAttachError) throw tmuxAttachError;
+  },
+}));
+
+mock.module(join(import.meta.dir, "../../src/vendor/mpr-plugins/attach-ssh/index"), () => ({
+  default: {
+    execute: async (target: unknown) => {
+      attachSshCalls.push(target);
+    },
   },
 }));
 
@@ -89,6 +100,7 @@ beforeEach(() => {
   spawnThrowsOnPipe = false;
   tmuxAttachCalls = [];
   tmuxAttachError = null;
+  attachSshCalls = [];
   logs = [];
   errors = [];
 
@@ -181,6 +193,61 @@ describe("attach impl command routing", () => {
     expect(output).toContain("'alpha' is ambiguous");
     expect(output).toContain("01-alpha");
     expect(output).toContain("02-alpha");
+    expect(spawnCalls).toEqual([]);
+  });
+
+  test("prints resolver errors without waking or attaching", async () => {
+    resolveQueue = [{
+      tier: "error",
+      error: "peer 'badnode' not found — check maw peers list",
+      hint: "use: maw peers list",
+    }];
+
+    await expect(cmdAttach("badnode:ghost")).rejects.toThrow("peer 'badnode' not found");
+
+    expect(errors.join("\n")).toContain("peer 'badnode' not found");
+    expect(errors.join("\n")).toContain("use: maw peers list");
+    expect(spawnCalls).toEqual([]);
+    expect(tmuxAttachCalls).toEqual([]);
+    expect(attachSshCalls).toEqual([]);
+  });
+
+  test("handles Tier 3 dry-run and remote attach strategy handoff", async () => {
+    const remote = {
+      tier: 3 as const,
+      node: "alpha",
+      sessionName: "volt-oracle",
+      peerUrl: "http://white.wg:3461",
+      sshAlias: "alpha@white.wg",
+    };
+
+    resolveQueue = [remote];
+    await cmdAttach("alpha:volt-oracle", { dryRun: true });
+    expect(logs.join("\n")).toContain("[dry-run] Tier 3 (remote) — would attach to alpha:volt-oracle via ssh alpha@white.wg");
+    expect(attachSshCalls).toEqual([]);
+    expect(tmuxAttachCalls).toEqual([]);
+
+    logs = [];
+    resolveQueue = [remote];
+    await cmdAttach("alpha:volt-oracle");
+    expect(logs.join("\n")).toContain("attaching to alpha:volt-oracle via ssh alpha@white.wg");
+    expect(attachSshCalls).toEqual([remote]);
+    expect(tmuxAttachCalls).toEqual([]);
+  });
+
+  test("rejects remote attach shell mode before strategy handoff", async () => {
+    resolveQueue = [{
+      tier: 3,
+      node: "alpha",
+      sessionName: "volt-oracle",
+      peerUrl: "http://white.wg:3461",
+      sshAlias: "alpha@white.wg",
+    }];
+
+    await expect(cmdAttach("alpha:volt-oracle", { shell: true })).rejects.toThrow("remote attach does not support --shell");
+
+    expect(errors.join("\n")).toContain("remote attach does not support --shell");
+    expect(attachSshCalls).toEqual([]);
     expect(spawnCalls).toEqual([]);
   });
 

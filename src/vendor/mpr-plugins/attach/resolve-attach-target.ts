@@ -1,5 +1,6 @@
 import { isInfrastructureChannelSessionName } from "../../../core/matcher/channel-session";
 import { resolveFleetWindowSessionTarget } from "../../../core/matcher/resolve-target";
+import { resolvePeer as resolveConfiguredPeer } from "../ls/internal/peer-resolve";
 
 /**
  * Resolve a `maw attach <target>` invocation into a tiered match.
@@ -11,11 +12,10 @@ import { resolveFleetWindowSessionTarget } from "../../../core/matcher/resolve-t
  *                      → prompt to wake, then attach
  *   null               → nothing matched: caller emits "available oracles" hint
  *
- * Tier 3 (cross-node federation attach) lived here briefly (#1236). It was
- * pulled back out — the built-in stays local-only. Cross-node attach is now
- * the job of the `attach-ssh` plugin (registry). Operators who want it
- * install that plugin explicitly. See:
- *   ψ/memory/traces/2026-05-13/1124_maw-a-original.md
+ * Tier 3 (explicit cross-node attach, #1876): `maw a <node>:<session>`
+ * resolves a configured peer and hands off to the attach-ssh strategy. This is
+ * intentionally explicit-only: bare `maw a <session>` remains local Tier 1/2 +
+ * wake and never scans the federation implicitly.
  *
  * Deps are injected for testability — same shape as the sleep resolver.
  */
@@ -30,9 +30,19 @@ export interface FleetLike {
   windows: Array<{ name: string }>;
 }
 
+export interface RemotePeerLike {
+  alias: string;
+  url: string;
+  node: string | null;
+  sshAlias?: string;
+  sshHost?: string;
+  sshUser?: string;
+}
+
 export interface ResolveDeps {
   listSessions: () => Promise<SessionLike[]>;
   loadFleet: () => FleetLike[];
+  resolvePeer?: (alias: string) => RemotePeerLike | null | Promise<RemotePeerLike | null>;
 }
 
 export type ResolveResult =
@@ -43,21 +53,56 @@ export type ResolveResult =
       ambiguousCandidates?: string[];
     }
   | { tier: 2; fleetName: string; ambiguousCandidates?: string[] }
+  | { tier: 3; sessionName: string; node: string; peerUrl: string; sshAlias: string }
+  | { tier: "error"; error: string; hint?: string }
   | null;
 
 const stripDash = (s: string) => s.replace(/-+$/, "");
 
 function normalizeAttachQuery(target: string): string {
+  return target.trim();
+}
+
+function parseExplicitPeerAttachTarget(target: string): { node: string; sessionName: string } | { error: string; hint?: string } | null {
   const trimmed = target.trim();
   const colon = trimmed.indexOf(":");
-  if (colon < 0) return trimmed;
-  const left = trimmed.slice(0, colon);
-  const right = trimmed.slice(colon + 1);
-  // Node-qualified targets such as `m5:mawjs` should resolve the oracle part
-  // locally. Numeric window/pane suffixes (`neo:0`, `neo:1.2`) are tmux
-  // syntax and must remain attached to the session target.
-  if (left && right && !/^\d+(?:\.\d+)?$/.test(right)) return right;
-  return trimmed;
+  if (colon < 0) return null;
+
+  const left = trimmed.slice(0, colon).trim();
+  const right = trimmed.slice(colon + 1).trim();
+
+  // Numeric window/pane suffixes (`neo:0`, `neo:1.2`) are local tmux syntax
+  // and must remain attached to the session target.
+  if (left && right && /^\d+(?:\.\d+)?$/.test(right)) return null;
+
+  if (!left || !right) {
+    return {
+      error: `invalid remote attach target '${trimmed}'`,
+      hint: "use: maw attach <node>:<session>",
+    };
+  }
+
+  return { node: left, sessionName: right };
+}
+
+function deriveSshAlias(peer: RemotePeerLike, nodeAlias: string): string {
+  if (peer.sshAlias?.trim()) return peer.sshAlias.trim();
+
+  let host = peer.sshHost?.trim() || "";
+  let user = peer.sshUser?.trim() || "";
+  if (!host) {
+    try {
+      const url = new URL(peer.url);
+      host = url.hostname || peer.url;
+      user = user || url.username;
+    } catch {
+      host = peer.url.replace(/^https?:\/\//, "").replace(/\/.*$/, "").replace(/:\d+$/, "");
+    }
+  }
+
+  if (!user && peer.node && peer.node !== nodeAlias) user = nodeAlias;
+  if (!host) return nodeAlias;
+  return user ? `${user}@${host}` : host;
 }
 
 function stripFleetAndOracle(name: string): string {
@@ -118,6 +163,27 @@ export async function resolveAttachTarget(
   deps: ResolveDeps,
   opts: { fuzzy?: boolean } = {},
 ): Promise<ResolveResult> {
+  const explicitPeerTarget = parseExplicitPeerAttachTarget(target);
+  if (explicitPeerTarget && "error" in explicitPeerTarget) {
+    return { tier: "error", error: explicitPeerTarget.error, hint: explicitPeerTarget.hint };
+  }
+  if (explicitPeerTarget) {
+    const peer = await (deps.resolvePeer ?? resolveConfiguredPeer)(explicitPeerTarget.node);
+    if (!peer) {
+      return {
+        tier: "error",
+        error: `peer '${explicitPeerTarget.node}' not found — check maw peers list`,
+      };
+    }
+    return {
+      tier: 3,
+      node: explicitPeerTarget.node,
+      sessionName: explicitPeerTarget.sessionName,
+      peerUrl: peer.url,
+      sshAlias: deriveSshAlias(peer, explicitPeerTarget.node),
+    };
+  }
+
   target = normalizeAttachQuery(target);
   const fuzzy = Boolean(opts.fuzzy);
   const sessions = (await deps.listSessions())

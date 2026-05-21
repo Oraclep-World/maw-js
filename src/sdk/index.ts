@@ -43,6 +43,8 @@ export {
   HostExecError,
 } from "../core/transport/ssh";
 export type { Session as SshSession, HostExecTransport } from "../core/transport/ssh";
+export { attachRemoteSession, SshAttachError } from "../core/transport/ssh-attach";
+export type { AttachRemoteSessionOptions } from "../core/transport/ssh-attach";
 export { curlFetch } from "../core/transport/curl-fetch";
 export {
   getPeers, getFederationStatus, findPeerForTarget,

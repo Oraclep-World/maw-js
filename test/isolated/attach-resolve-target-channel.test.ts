@@ -133,15 +133,79 @@ describe("attach resolver channel-session filtering", () => {
     expect(result).toEqual({ tier: 2, fleetName: "Somwind-oracle" });
   });
 
-  test("resolves node-qualified attach targets by oracle part", async () => {
+  test("resolves explicit node-qualified attach targets as tier 3 remote ssh targets", async () => {
     const result = await resolveAttachTarget("m5:mawjs", {
       listSessions: async () => [
         { name: "50-mawjs", windows: [{ name: "mawjs-oracle" }] },
       ],
       loadFleet: () => [],
+      resolvePeer: async (alias: string) => ({
+        alias,
+        url: "http://m5.local:3456",
+        node: "m5",
+        sshAlias: "m5-ssh",
+      }),
+    });
+
+    expect(result).toEqual({
+      tier: 3,
+      node: "m5",
+      sessionName: "mawjs",
+      peerUrl: "http://m5.local:3456",
+      sshAlias: "m5-ssh",
+    });
+  });
+
+  test("derives cross-node ssh aliases from peer URL and node alias", async () => {
+    const result = await resolveAttachTarget("alpha:volt-oracle", {
+      listSessions: async () => [],
+      loadFleet: () => [],
+      resolvePeer: async (alias: string) => ({
+        alias,
+        url: "http://white.wg:3461",
+        node: "white",
+      }),
+    });
+
+    expect(result).toEqual({
+      tier: 3,
+      node: "alpha",
+      sessionName: "volt-oracle",
+      peerUrl: "http://white.wg:3461",
+      sshAlias: "alpha@white.wg",
+    });
+  });
+
+  test("reports unknown explicit remote peers instead of falling back locally", async () => {
+    const result = await resolveAttachTarget("badnode:mawjs", {
+      listSessions: async () => [
+        { name: "50-mawjs", windows: [{ name: "mawjs-oracle" }] },
+      ],
+      loadFleet: () => [],
+      resolvePeer: async () => null,
+    });
+
+    expect(result).toEqual({
+      tier: "error",
+      error: "peer 'badnode' not found — check maw peers list",
+    });
+  });
+
+  test("bare attach stays local-only and never consults peers", async () => {
+    let peerLookups = 0;
+    const result = await resolveAttachTarget("mawjs", {
+      listSessions: async () => [
+        { name: "50-mawjs", windows: [{ name: "mawjs-oracle" }] },
+      ],
+      loadFleet: () => [],
+      resolvePeer: async () => {
+        peerLookups++;
+        return null;
+      },
     });
 
     expect(result).toEqual({ tier: 1, sessionName: "50-mawjs" });
+    expect(peerLookups).toBe(0);
   });
 
   test("preserves exact live window matches for multi-window sessions", async () => {
