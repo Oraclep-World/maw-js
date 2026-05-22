@@ -181,7 +181,7 @@ export interface TmuxLsOpts {
   filter?: string;
   /** Include infrastructure channel sessions such as *-discord. */
   channels?: boolean;
-  /** Legacy alias for fleetOnly. */
+  /** Deprecated internal alias kept as a no-op so old compact callers cannot hide live orphans. */
   oracleOnly?: boolean;
   /** Hide live sessions that are not fleet-shaped/fleet-registered. */
   fleetOnly?: boolean;
@@ -379,7 +379,7 @@ export async function cmdTmuxLs(opts: TmuxLsOpts = {}): Promise<void> {
       .some(value => String(value ?? "").toLowerCase().includes(filter)));
   }
 
-  if ((opts.fleetOnly || opts.oracleOnly) && !opts.roster && !opts.channels) {
+  if (opts.fleetOnly && !opts.roster && !opts.channels) {
     scope = scope.filter(p => isFleetListSession(p.session, fleetSessions));
   }
 

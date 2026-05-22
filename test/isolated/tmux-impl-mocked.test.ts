@@ -266,6 +266,14 @@ describe("cmdTmuxLs — mocked pane listing", () => {
     expect(out.logs).not.toContain("foo");
     expect(out.logs).not.toContain("52---help");
 
+    out = await captureLogs(() => cmdTmuxLs({ all: true, compact: true, oracleOnly: true }));
+    expect(out.logs).toContain("50-mawjs");
+    expect(out.logs).toContain("--help");
+    expect(out.logs).toContain("foo");
+    expect(out.logs).toContain("52---help");
+    expect(out.logs).toContain("[orphan]");
+    expect(out.logs).not.toContain("No panes found");
+
     out = await captureLogs(() => cmdTmuxLs({ all: true, compact: true, roster: true }));
     expect(out.logs).toContain("50-mawjs");
     expect(out.logs).toContain("--help");

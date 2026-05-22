@@ -180,6 +180,18 @@ describe("top alias option parsers", () => {
 });
 
 describe("direct handler invocation", () => {
+  test("#1891 cmdLs bare compact path does not request the legacy fleet-only filter", async () => {
+    await invokeDirectHandler("cmdLs", []);
+    expect(tmuxLsCalls).toEqual([{
+      all: true,
+      compact: true,
+      verbose: false,
+      roster: false,
+      json: false,
+    }]);
+    expect(lsFederatedCalls).toEqual([]);
+  });
+
   test("cmdLs dispatches parsed default ls options to local tmux ls", async () => {
     await invokeDirectHandler("cmdLs", ["--json", "-r", "5", "--active", "45m", "-v"]);
     expect(tmuxLsCalls).toEqual([{
