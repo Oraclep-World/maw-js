@@ -287,6 +287,12 @@ function isFleetListSession(sessionName: string, fleetSessions: ReadonlySet<stri
   return fleetSessions.has(sessionName);
 }
 
+function isOrphanListSession(sessionName: string, fleetSessions: ReadonlySet<string>): boolean {
+  if (isFleetListSession(sessionName, fleetSessions)) return false;
+  if (sessionName === "maw-view" || /-view$/.test(sessionName)) return false;
+  return true;
+}
+
 async function sessionCreatedTimes(): Promise<Map<string, number>> {
   const raw = await hostExec(`${tmuxCmd()} list-sessions -F '#{session_name}\t#{session_created}'`).catch(() => "");
   return parseSessionCreatedList(raw);
@@ -342,13 +348,15 @@ export async function cmdTmuxLs(opts: TmuxLsOpts = {}): Promise<void> {
     const ageSec = p.lastActivity ? nowEpoch - p.lastActivity : -1;
     const status: PaneStatus = ageSec < 0 ? "unknown" : ageSec < 30 ? "active" : ageSec < 300 ? "idle" : "stale";
     const session = sessionNameFromPaneTarget(p.target);
+    const annotation = annotatePane(p, fleetSessions, teamByPane)
+      || (isOrphanListSession(session, fleetSessions) ? "orphan" : "");
     return {
       id: p.id,
       target: p.target,
       session,
       command: p.command,
       title: p.title,
-      annotation: annotatePane(p, fleetSessions, teamByPane),
+      annotation,
       status,
       lastActivitySec: ageSec < 0 ? 0 : ageSec,
       sessionCreated: createdBySession.get(session),
@@ -1010,7 +1018,7 @@ function findSimilarOracles(target: string): string[] {
  * lookup map, return the one-line label for the "ANNOTATION" column.
  * Exported for unit test.
  *
- * Precedence: team > fleet > view > orphan (non-fleet live session).
+ * Precedence: team > fleet > view > orphan (claude-like unknown pane) > "".
  */
 export function annotatePane(
   p: { id: string; target: string; command?: string },
@@ -1022,5 +1030,6 @@ export function annotatePane(
   if (team) return `team: ${team}`;
   if (fleetSessions.has(session)) return `fleet: ${session.replace(/^\d+-/, "")}`;
   if (session === "maw-view" || /-view$/.test(session)) return `view: ${session}`;
-  return "orphan";
+  if (isClaudeLikePane(p.command)) return "orphan";
+  return "";
 }
