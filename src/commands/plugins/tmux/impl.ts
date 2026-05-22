@@ -181,8 +181,10 @@ export interface TmuxLsOpts {
   filter?: string;
   /** Include infrastructure channel sessions such as *-discord. */
   channels?: boolean;
-  /** Hide non-oracle junk sessions in top-level maw ls compact views. */
+  /** Legacy alias for fleetOnly. */
   oracleOnly?: boolean;
+  /** Hide live sessions that are not fleet-shaped/fleet-registered. */
+  fleetOnly?: boolean;
   /** Include expensive verification/noise such as worktree-bind rows. */
   verify?: boolean;
 }
@@ -277,10 +279,9 @@ function sessionNameFromPaneTarget(target: string): string {
   return target.split(":")[0] || target;
 }
 
-function isDefaultOracleListSession(sessionName: string, fleetSessions: ReadonlySet<string>): boolean {
-  // Top-level `maw ls` is an oracle roster, not a raw tmux dump. Hide junk
-  // sessions like `--help`, `foo`, and stale app names by default (#1796).
-  // `--all`/`--roster` and `maw tmux ls` remain available for raw inventory.
+function isFleetListSession(sessionName: string, fleetSessions: ReadonlySet<string>): boolean {
+  // Legacy `maw ls --fleet-only` filter: keep fleet-shaped sessions and
+  // registered fleet entries, hiding ad hoc/orphan tmux sessions.
   const numericFleet = sessionName.match(/^\d+-(.+)$/);
   if (numericFleet) return !numericFleet[1].startsWith("-");
   return fleetSessions.has(sessionName);
@@ -370,8 +371,8 @@ export async function cmdTmuxLs(opts: TmuxLsOpts = {}): Promise<void> {
       .some(value => String(value ?? "").toLowerCase().includes(filter)));
   }
 
-  if (opts.oracleOnly && opts.compact && !opts.roster && !opts.channels) {
-    scope = scope.filter(p => isDefaultOracleListSession(p.session, fleetSessions));
+  if ((opts.fleetOnly || opts.oracleOnly) && !opts.roster && !opts.channels) {
+    scope = scope.filter(p => isFleetListSession(p.session, fleetSessions));
   }
 
   const activeThresholdSec = opts.activeThresholdSec ?? DEFAULT_ACTIVE_THRESHOLD_SEC;
@@ -476,13 +477,16 @@ export async function cmdTmuxLs(opts: TmuxLsOpts = {}): Promise<void> {
       const activeTag = opts.active && panes[0]?.sessionActivity
         ? `  \x1b[90mlast ${formatAge(Math.max(0, nowEpoch - panes[0].sessionActivity))}\x1b[0m`
         : "";
+      const orphanTag = panes.length > 0 && panes.every(p => p.annotation === "orphan")
+        ? "  \x1b[33m[orphan]\x1b[0m"
+        : "";
       if (opts.recent) {
         const sessionWidth = Math.max(18, ...sessionRows.map(([name]) => name.length));
         const created = formatSessionCreated(panes[0]?.sessionCreated);
         const afterName = " ".repeat(Math.max(1, sessionWidth - sess.length + 1));
-        console.log(`  ${pad(String(index + 1), 3)} \x1b[36m${sess}\x1b[0m${afterName} ${created} ${pad(dot, 6)} ${pad(count, 8)}${agentTag}${activeTag}`);
+        console.log(`  ${pad(String(index + 1), 3)} \x1b[36m${sess}\x1b[0m${afterName} ${created} ${pad(dot, 6)} ${pad(count, 8)}${agentTag}${activeTag}${orphanTag}`);
       } else {
-        console.log(`  ${dot} \x1b[36m${sess}\x1b[0m  \x1b[90m${count}\x1b[0m${agentTag}${activeTag}`);
+        console.log(`  ${dot} \x1b[36m${sess}\x1b[0m  \x1b[90m${count}\x1b[0m${agentTag}${activeTag}${orphanTag}`);
       }
       for (const p of panes.filter(p => p.status === "frozen")) {
         console.log(`    \x1b[33m⚠\x1b[0m \x1b[90m${p.target} context-limit — /compact needed\x1b[0m`);
@@ -530,13 +534,14 @@ export async function cmdTmuxLs(opts: TmuxLsOpts = {}): Promise<void> {
   for (const p of scope) {
     const dot = STATUS_DOT[p.status];
     const age = formatAge(p.lastActivitySec);
-    const annColored = p.annotation.startsWith("team:") ? `\x1b[36m${p.annotation}\x1b[0m`
-      : p.annotation.startsWith("fleet:") ? `\x1b[32m${p.annotation}\x1b[0m`
-      : p.annotation.startsWith("view:") ? `\x1b[90m${p.annotation}\x1b[0m`
-      : p.annotation === "orphan" ? `\x1b[33morphan\x1b[0m`
+    const annotation = p.annotation === "orphan" ? "[orphan]" : p.annotation;
+    const annColored = p.annotation.startsWith("team:") ? `\x1b[36m${annotation}\x1b[0m`
+      : p.annotation.startsWith("fleet:") ? `\x1b[32m${annotation}\x1b[0m`
+      : p.annotation.startsWith("view:") ? `\x1b[90m${annotation}\x1b[0m`
+      : p.annotation === "orphan" ? `\x1b[33m${annotation}\x1b[0m`
       : "";
-    const annPad = pad(p.annotation, 30);
-    const annRendered = annColored ? annColored + annPad.slice(p.annotation.length) : annPad;
+    const annPad = pad(annotation, 30);
+    const annRendered = annColored ? annColored + annPad.slice(annotation.length) : annPad;
     const created = opts.recent ? `${pad(formatSessionCreated(p.sessionCreated), createdWidth)} ` : "";
     console.log(`  ${dot} ${pad(p.target, targetWidth)} ${pad(p.command || "", 10)} ${pad(age, 6)} ${created}${annRendered} \x1b[90m${(p.title || "").slice(0, 50)}\x1b[0m`);
   }
@@ -1005,7 +1010,7 @@ function findSimilarOracles(target: string): string[] {
  * lookup map, return the one-line label for the "ANNOTATION" column.
  * Exported for unit test.
  *
- * Precedence: team > fleet > view > orphan (claude-only) > "".
+ * Precedence: team > fleet > view > orphan (non-fleet live session).
  */
 export function annotatePane(
   p: { id: string; target: string; command?: string },
@@ -1017,6 +1022,5 @@ export function annotatePane(
   if (team) return `team: ${team}`;
   if (fleetSessions.has(session)) return `fleet: ${session.replace(/^\d+-/, "")}`;
   if (session === "maw-view" || /-view$/.test(session)) return `view: ${session}`;
-  if (p.command?.includes("claude")) return "orphan";
-  return "";
+  return "orphan";
 }

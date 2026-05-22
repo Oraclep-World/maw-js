@@ -322,7 +322,6 @@ describe("resolveTopAlias — RFC #954 verb aliases", () => {
       verbose: false,
       roster: false,
       json: false,
-      oracleOnly: true,
     });
     expect(parseLsAliasOpts(["-c"])).toEqual({
       all: true,
@@ -330,7 +329,6 @@ describe("resolveTopAlias — RFC #954 verb aliases", () => {
       verbose: false,
       roster: false,
       json: false,
-      oracleOnly: true,
     });
   });
 
@@ -358,7 +356,17 @@ describe("resolveTopAlias — RFC #954 verb aliases", () => {
       verbose: false,
       roster: false,
       json: false,
-      oracleOnly: true,
+    });
+  });
+
+  test("#1890 parse ls opts: --fleet-only restores the legacy compact filter", () => {
+    expect(parseLsAliasOpts(["--fleet-only"])).toEqual({
+      all: true,
+      compact: true,
+      verbose: false,
+      roster: false,
+      json: false,
+      fleetOnly: true,
     });
   });
 
@@ -380,7 +388,6 @@ describe("resolveTopAlias — RFC #954 verb aliases", () => {
       verbose: false,
       roster: false,
       json: false,
-      oracleOnly: true,
       recent: true,
     });
     expect(parseLsAliasOpts(["--recent", "5", "-v"])).toEqual({
@@ -398,7 +405,6 @@ describe("resolveTopAlias — RFC #954 verb aliases", () => {
       verbose: false,
       roster: false,
       json: false,
-      oracleOnly: true,
       recent: true,
       recentLimit: 5,
       active: true,

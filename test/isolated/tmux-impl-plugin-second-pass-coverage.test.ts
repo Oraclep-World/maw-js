@@ -180,7 +180,7 @@ describe("tmux impl plugin second-pass isolated coverage", () => {
     expect(compact.logs).toContain("maw ls -v");
   });
 
-  test("annotatePane precedence favors team over fleet, then view, orphan, and empty", () => {
+  test("annotatePane precedence favors team over fleet, then view, then orphan for non-fleet sessions", () => {
     const fleet = new Set(["101-fleet"]);
     const teams = new Map([["%1", "pilot @ ops"]]);
 
@@ -188,7 +188,7 @@ describe("tmux impl plugin second-pass isolated coverage", () => {
     expect(annotatePane({ id: "%2", target: "101-fleet:0.1", command: "zsh" }, fleet, teams)).toBe("fleet: fleet");
     expect(annotatePane({ id: "%3", target: "custom-view:0.0", command: "zsh" }, fleet, teams)).toBe("view: custom-view");
     expect(annotatePane({ id: "%4", target: "loose:0.0", command: "claude-code" }, fleet, teams)).toBe("orphan");
-    expect(annotatePane({ id: "%5", target: "loose:0.1", command: "zsh" }, fleet, teams)).toBe("");
+    expect(annotatePane({ id: "%5", target: "loose:0.1", command: "zsh" }, fleet, teams)).toBe("orphan");
   });
 
   test("peek honors explicit line counts and wraps non-pane targets through resolver source", async () => {

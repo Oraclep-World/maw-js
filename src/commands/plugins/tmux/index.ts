@@ -99,6 +99,7 @@ export function createTmuxHandler(overrides: Partial<TmuxHandlerDeps> = {}) {
         "--active": Boolean,
         "--node": String,
         "--channels": Boolean,
+        "--fleet-only": Boolean,
         "--help": Boolean,
         "-h": "--help",
       }, 1);
@@ -113,6 +114,7 @@ export function createTmuxHandler(overrides: Partial<TmuxHandlerDeps> = {}) {
         console.log("  --active:   filter to sessions active within threshold (default 30m)");
         console.log("  --node:     filter sessions by node/session text");
         console.log("  --channels: include infrastructure channel sessions such as *-discord");
+        console.log("  --fleet-only: hide orphan/ad hoc tmux sessions");
         return { ok: true, output: logs.join("\n") || undefined };
       }
       const positionals = flags._ as string[];
@@ -140,6 +142,7 @@ export function createTmuxHandler(overrides: Partial<TmuxHandlerDeps> = {}) {
       const filter = nodeFilter || positionalFilter;
       if (filter) lsOpts.filter = filter;
       if (flags["--channels"] || flags["--all"]) lsOpts.channels = true;
+      if (flags["--fleet-only"]) lsOpts.fleetOnly = true;
       await deps.cmdTmuxLs(lsOpts);
     } else if (sub === "peek") {
       const flags = parseFlags(args, {

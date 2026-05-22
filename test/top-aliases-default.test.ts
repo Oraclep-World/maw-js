@@ -111,7 +111,6 @@ describe("top alias option parsers", () => {
       verbose: false,
       roster: false,
       json: false,
-      oracleOnly: true,
     });
     expect(parseLsAliasOpts(["--json", "--all", "--recent", "12", "--compact", "--verbose"])).toEqual({
       all: true,
@@ -129,7 +128,6 @@ describe("top alias option parsers", () => {
       verbose: false,
       roster: false,
       json: false,
-      oracleOnly: true,
       recent: true,
     });
     expect(parseLsAliasOpts(["--active", "1h"])).toEqual({
@@ -138,7 +136,6 @@ describe("top alias option parsers", () => {
       verbose: false,
       roster: false,
       json: false,
-      oracleOnly: true,
       active: true,
       activeThresholdSec: 3600,
     });
@@ -148,6 +145,14 @@ describe("top alias option parsers", () => {
       verbose: true,
       roster: false,
       json: false,
+    });
+    expect(parseLsAliasOpts(["--fleet-only"])).toEqual({
+      all: true,
+      compact: true,
+      verbose: false,
+      roster: false,
+      json: false,
+      fleetOnly: true,
     });
   });
 
@@ -200,6 +205,7 @@ describe("direct handler invocation", () => {
     expect(calls.tmuxLs).toEqual([]);
     expect(calls.logs.join("\n")).toContain("usage: maw ls");
     expect(calls.logs.join("\n")).toContain("--active");
+    expect(calls.logs.join("\n")).toContain("--fleet-only");
   });
 
   test("cmdLs missing --node value prints friendly usage instead of ArgError", async () => {

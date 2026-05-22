@@ -216,6 +216,7 @@ export function parseLsAliasOpts(argv: string[]) {
     "--active": Boolean,
     "--node": String,
     "--channels": Boolean,
+    "--fleet-only": Boolean,
     "--verify": Boolean,
   }, 0);
 
@@ -237,7 +238,7 @@ export function parseLsAliasOpts(argv: string[]) {
     activeThresholdSec?: number;
     filter?: string;
     channels?: boolean;
-    oracleOnly?: boolean;
+    fleetOnly?: boolean;
     verify?: boolean;
     federation?: boolean;
   } = {
@@ -248,7 +249,7 @@ export function parseLsAliasOpts(argv: string[]) {
     json: !!flags["--json"],
   };
   if (flags["--channels"] || flags["--all"]) opts.channels = true;
-  if (compact && !flags["--all"] && !flags["--channels"]) opts.oracleOnly = true;
+  if (flags["--fleet-only"]) opts.fleetOnly = true;
   if (flags["--verify"]) opts.verify = true;
   if (flags["--federation"]) opts.federation = true;
   const positionals = flags._ as string[];
@@ -278,7 +279,7 @@ export function parseLsAliasOpts(argv: string[]) {
 function printLsAliasUsage(write: (line: string) => void): void {
   write("usage: maw ls [filter] [--all|-a] [--verbose|-v] [--compact|-c] [--json] [--recent|-r [N]] [--active [30m|1h]]");
   write("       maw ls --federation [--node <node>] [--json]");
-  write("       maw ls --channels | --verify | --fix");
+  write("       maw ls --channels | --fleet-only | --verify | --fix");
   write("");
   write("List live local sessions by default. Use --federation for local + peer inventory.");
   write("");
@@ -287,6 +288,7 @@ function printLsAliasUsage(write: (line: string) => void): void {
   write("  -v, --verbose      show full per-pane detail");
   write("  -a, --all          include sleeping roster and channel sessions");
   write("  --channels         include channel/infrastructure sessions");
+  write("  --fleet-only       hide orphan/ad hoc tmux sessions (legacy compact filter)");
   write("  -r, --recent [N]   sort newest-first, optionally limiting to N sessions");
   write("  --active [DUR]     show sessions touched within a duration (default from tmux helper)");
   write("  --node <node>      filter sessions by node/name");

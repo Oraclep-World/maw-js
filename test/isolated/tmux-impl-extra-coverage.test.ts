@@ -445,7 +445,7 @@ describe("tmux impl extra coverage", () => {
     expect(annotatePane({ id: "%2", target: "10-demo:0.0", command: "zsh" }, new Set(["10-demo"]), new Map())).toBe("fleet: demo");
     expect(annotatePane({ id: "%3", target: "demo-view:0.0", command: "zsh" }, new Set(), new Map())).toBe("view: demo-view");
     expect(annotatePane({ id: "%4", target: "shell:0.0", command: "claude" }, new Set(), new Map())).toBe("orphan");
-    expect(annotatePane({ id: "%5", target: "shell:0.0", command: "zsh" }, new Set(), new Map())).toBe("");
+    expect(annotatePane({ id: "%5", target: "shell:0.0", command: "zsh" }, new Set(), new Map())).toBe("orphan");
     expect(similarOracleCandidatesFromRepos("pulse", [
       "/opt/Code/github.com/Soul-Brews-Studio/pulse-oracle",
       "/opt/Code/github.com/Soul-Brews-Studio/pulse-oracle",
