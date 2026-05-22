@@ -14,6 +14,7 @@ import { runWakeLifecycleHooks } from "../../plugin/lifecycle";
 import { parseWakeTarget, ensureCloned } from "./wake-target";
 import { assertAgentCapacity } from "./wake-concurrency";
 import { latestSnapshot, loadSnapshot, type Snapshot, type SnapshotSession } from "../../core/fleet/snapshot";
+import { loadFleet, type FleetSession } from "./fleet-load";
 import { listClaudeSessions, type ClaudeSession } from "../../core/fleet/claude-sessions";
 import { UserError } from "../../core/util/user-error";
 import {
@@ -553,6 +554,73 @@ async function resolveExistingSessionBringTarget(
   return sessions.some(s => s.name === sessionName) ? sessionName : null;
 }
 
+export type WakeFleetSessionMetadata = {
+  session: string;
+  oracle: string;
+  windowName: string;
+  repo: string;
+};
+
+function normalizeFleetRepoSlug(repo: string): string {
+  return repo
+    .trim()
+    .replace(/^https?:\/\/github\.com\//i, "")
+    .replace(/^git@github\.com:/i, "")
+    .replace(/\.git$/i, "")
+    .replace(/^github\.com\//i, "");
+}
+
+function fleetRepoStem(repo: string): string {
+  const slug = normalizeFleetRepoSlug(repo);
+  return slug.split("/").filter(Boolean).pop() || slug;
+}
+
+function primaryFleetOracleWindow(session: FleetSession): { name: string; repo: string } | null {
+  const windows = (session.windows || []).filter((w): w is { name: string; repo: string } => Boolean(w?.name && w?.repo));
+  return windows.find(w => Boolean(stripOracleRepoSuffix(w.name))) || windows[0] || null;
+}
+
+export function resolveWakeFleetSessionMetadata(
+  sessionName: string,
+  fleetSessions: FleetSession[] = loadFleet(),
+): WakeFleetSessionMetadata | null {
+  const session = fleetSessions.find(s => s.name === sessionName);
+  if (!session) return null;
+  const window = primaryFleetOracleWindow(session);
+  if (!window) return null;
+  const oracle = stripOracleRepoSuffix(window.name)
+    || stripOracleRepoSuffix(fleetRepoStem(window.repo))
+    || session.name.replace(/^\d+-/, "");
+  return {
+    session: session.name,
+    oracle,
+    windowName: window.name,
+    repo: normalizeFleetRepoSlug(window.repo),
+  };
+}
+
+async function resolveWakeFleetSessionRepo(meta: WakeFleetSessionMetadata): Promise<{ repoPath: string; repoName: string; parentDir: string }> {
+  const repoStem = fleetRepoStem(meta.repo);
+  const existing = await ghqFind(`/${meta.repo}`) || await ghqFind(`/${repoStem}`);
+  if (existing) {
+    return { repoPath: existing, repoName: existing.split("/").pop()!, parentDir: existing.replace(/\/[^/]+$/, "") };
+  }
+
+  console.log(`\x1b[36m🌱\x1b[0m ${meta.session} pinned in fleet → github.com/${meta.repo} — cloning to ghq...`);
+  try {
+    await hostExec(`ghq get -u 'github.com/${meta.repo}'`);
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error(`\x1b[33m⚠\x1b[0m fleet-pinned ${meta.repo} clone/update failed: ${msg.split("\n")[0]}`);
+  }
+  const cloned = await ghqFind(`/${meta.repo}`) || await ghqFind(`/${repoStem}`);
+  if (cloned) {
+    console.log(`\x1b[32m✓\x1b[0m found at ${cloned}`);
+    return { repoPath: cloned, repoName: cloned.split("/").pop()!, parentDir: cloned.replace(/\/[^/]+$/, "") };
+  }
+  throw new Error(`fleet-pinned ${meta.repo} for session ${meta.session} — clone failed and not found locally`);
+}
+
 async function chooseWakeSessionName(oracle: string, urlRepoName?: string): Promise<string> {
   const mappedOrFleet = getSessionMap()[oracle] || resolveFleetSession(oracle);
   const baseName = mappedOrFleet || canonicalSessionName(urlRepoName || oracle);
@@ -595,13 +663,25 @@ export async function cmdWake(oracle: string, opts: WakeOptions): Promise<string
   // #358 — reject -view suffix at the user-input boundary (before any session work).
   assertValidOracleName(oracle);
   let preResolvedSession: string | null = null;
+  let preResolvedFleetSession: WakeFleetSessionMetadata | null = null;
   const numericFleetTarget = oracle.match(/^\d+-(.+)$/);
   if (numericFleetTarget) {
     // #1469 — a user may pass the exact live tmux session (`48-foo`) to
     // bring/split. Prefer that exact session before resolving a repo; then
     // strip the fleet prefix only for repo/oracle lookup (`foo-oracle`).
     const sessions = await tmux.listSessions().catch(() => [] as { name: string }[]);
-    if (sessions.some(s => s.name === oracle)) {
+    const sessionIsLive = sessions.some(s => s.name === oracle);
+    // #1892 — if that exact session is fleet-registered, its window/repo
+    // metadata is authoritative even while the session is sleeping. Do not
+    // re-fuzzy the compact session stem (`79-mawjscodex` → `mawjscodex`)
+    // through local repos; that can match sibling repos such as `mawjs-oracle`.
+    // Preserve the fleet window stem for tmux names and resolve the fleet-
+    // pinned repo directly below.
+    preResolvedFleetSession = resolveWakeFleetSessionMetadata(oracle);
+    if (preResolvedFleetSession) {
+      if (sessionIsLive) preResolvedSession = oracle;
+      oracle = preResolvedFleetSession.oracle;
+    } else if (sessionIsLive) {
       preResolvedSession = oracle;
       oracle = numericFleetTarget[1]!;
     }
@@ -648,6 +728,8 @@ export async function cmdWake(oracle: string, opts: WakeOptions): Promise<string
   } else if (parsedRepoPath) {
     const repoPath = parsedRepoPath;
     resolved = { repoPath, repoName: repoPath.split("/").pop()!, parentDir: repoPath.replace(/\/[^/]+$/, "") };
+  } else if (preResolvedFleetSession) {
+    resolved = await resolveWakeFleetSessionRepo(preResolvedFleetSession);
   } else if (opts.incubate) {
     const slug = opts.incubate;
     // CodeQL js/incomplete-url-substring-sanitization: use prefix anchor, not
@@ -682,7 +764,7 @@ export async function cmdWake(oracle: string, opts: WakeOptions): Promise<string
   // #997 — when fuzzy match resolved a different repo (e.g. "v3" → "arra-oracle-v3-oracle"),
   // update oracle to the resolved name so session/window names are correct.
   const resolvedOracle = repoName.replace(/-oracle$/, "");
-  if (resolvedOracle !== oracle && repoName.endsWith("-oracle")) {
+  if (!preResolvedFleetSession && resolvedOracle !== oracle && repoName.endsWith("-oracle")) {
     oracle = resolvedOracle;
   }
 

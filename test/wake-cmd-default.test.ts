@@ -7,6 +7,7 @@ import {
   findWakeSnapshotSession,
   getLiveTileRoles,
   promptAmbiguousWorktreePick,
+  resolveWakeFleetSessionMetadata,
   _wtPicker,
   planRehydrateWorktreeWindows,
   planSnapshotRestoreWindows,
@@ -120,6 +121,33 @@ describe("wake-bud lineage helpers — default coverage", () => {
       task: "issue-1637",
       branch: "alpha",
       worktreePath: "/repo/mawjs-oracle.wt-issue-1637",
+    });
+  });
+});
+
+
+describe("wake fleet session metadata — default coverage", () => {
+  it("keeps compact fleet session stems tied to their pinned repo (#1892)", () => {
+    expect(resolveWakeFleetSessionMetadata("79-mawjscodex", [{
+      name: "79-mawjscodex",
+      windows: [{ name: "mawjscodex-oracle", repo: "Soul-Brews-Studio/mawjs-codex-oracle" }],
+    }])).toEqual({
+      session: "79-mawjscodex",
+      oracle: "mawjscodex",
+      windowName: "mawjscodex-oracle",
+      repo: "Soul-Brews-Studio/mawjs-codex-oracle",
+    });
+  });
+
+  it("falls back to repo stems when a fleet window is not oracle-named", () => {
+    expect(resolveWakeFleetSessionMetadata("23-discord-admin", [{
+      name: "23-discord-admin",
+      windows: [{ name: "admin", repo: "Soul-Brews-Studio/discord-oracle.git" }],
+    }])).toEqual({
+      session: "23-discord-admin",
+      oracle: "discord",
+      windowName: "admin",
+      repo: "Soul-Brews-Studio/discord-oracle",
     });
   });
 });
