@@ -167,6 +167,12 @@ function rejectSenderIdentity(error: unknown): never {
   process.exit(1);
 }
 
+function aclSenderOracle(config: ReturnType<typeof loadConfig>, senderIdentity: SenderIdentity): string {
+  return senderIdentity.source === "auto"
+    ? (config.oracle ?? "mawjs")
+    : senderIdentity.senderName;
+}
+
 /**
  * Visible internal federation attribution.
  *
@@ -466,7 +472,8 @@ export async function cmdSend(
     const { discoverPackages, invokePlugin } = await import("../../plugin/registry");
     const plugin = discoverPackages().find(p => p.manifest.name === name);
     if (!plugin) { console.error(`plugin not found: ${name}`); process.exit(1); }
-    const result = await invokePlugin(plugin, { source: "peer", args: { message, from: senderIdentity.display } });
+    const pluginFrom = senderIdentity.source === "auto" ? (config.node ?? "local") : senderIdentity.display;
+    const result = await invokePlugin(plugin, { source: "peer", args: { message, from: pluginFrom } });
     if (result.ok) { console.log(result.output ?? "(no output)"); return; }
     console.error(`plugin error: ${result.error}`);
     process.exit(1);
@@ -604,7 +611,7 @@ export async function cmdSend(
       // pre-#642 setups working unchanged. Operators opt in to the gate
       // by creating their first scope via `maw scope create`.
       if (scopes.length > 0) {
-        const senderOracle = senderIdentity.senderName;
+        const senderOracle = aclSenderOracle(config, senderIdentity);
         const targetOracle = result.target; // agent name from `<node>:<agent>`
         const decision = evaluateAclFromDisk(senderOracle, targetOracle);
         if (decision === "queue") {
@@ -641,7 +648,7 @@ export async function cmdSend(
   if (opts.approve && opts.trust && result?.type === "peer") {
     try {
       const { cmdAdd } = await import("../../lib/trust-store");
-      const senderOracle = senderIdentity.senderName;
+      const senderOracle = aclSenderOracle(config, senderIdentity);
       const targetOracle = result.target;
       cmdAdd(senderOracle, targetOracle);
       console.log(
