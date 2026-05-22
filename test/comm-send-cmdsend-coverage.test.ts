@@ -688,6 +688,30 @@ describe("cmdSend — bare-name, wake, and safety gates", () => {
     expect(JSON.parse(curlFetchCalls[0].options.body)).toEqual({ target: "oracle" });
   });
 
+  test("cross-node explicit oracle session sends directly without remote wake", async () => {
+    config.namedPeers = [{ name: "remote", url: "http://remote:3456" }];
+    resolveTargetReturn = { type: "peer", target: "volt-oracle", node: "remote", peerUrl: "http://remote:3456" };
+    curlFetchHandler = () => ({ ok: true, status: 200, data: { ok: true, target: "05-volt:1" } });
+
+    await runCmd(() => cmdSend("remote:volt-oracle", "hello"));
+
+    expect(exitCode).toBeUndefined();
+    expect(curlFetchCalls.map(c => c.url)).toEqual(["http://remote:3456/api/send"]);
+    expect(JSON.parse(curlFetchCalls[0].options.body)).toMatchObject({ target: "volt-oracle" });
+  });
+
+  test("cross-node explicit session window suffix sends directly with suffix preserved", async () => {
+    config.namedPeers = [{ name: "remote", url: "http://remote:3456" }];
+    resolveTargetReturn = { type: "peer", target: "volt-oracle:1", node: "remote", peerUrl: "http://remote:3456" };
+    curlFetchHandler = () => ({ ok: true, status: 200, data: { ok: true, target: "05-volt:1" } });
+
+    await runCmd(() => cmdSend("remote:volt-oracle:1", "hello"));
+
+    expect(exitCode).toBeUndefined();
+    expect(curlFetchCalls.map(c => c.url)).toEqual(["http://remote:3456/api/send"]);
+    expect(JSON.parse(curlFetchCalls[0].options.body)).toMatchObject({ target: "volt-oracle:1" });
+  });
+
   test("cross-node wake failures stop before send", async () => {
     config.namedPeers = [{ name: "remote", url: "http://remote:3456" }];
     resolveTargetReturn = { type: "peer", target: "oracle", node: "remote", peerUrl: "http://remote:3456" };

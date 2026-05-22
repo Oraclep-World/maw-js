@@ -8,8 +8,12 @@ let sessions: Array<{ name: string; windows?: unknown[] }> = [];
 let resolved: { kind: string; match?: { name: string; windows?: unknown[] } } = { kind: "none" };
 let config: { agents?: Record<string, string>; node?: string } = { node: "local-node" };
 let listSessionsThrows = false;
+let curlFetchCalls: Array<{ url: string; options: any }> = [];
+let curlFetchQueue: any[] = [];
+let originalPeersFile: string | undefined;
 
 const fleetDir = join(tmpdir(), `maw-locate-fleet-${process.pid}`);
+const peersFile = join(tmpdir(), `maw-locate-peers-${process.pid}.json`);
 
 mock.module("maw-js/core/ghq", () => ({
   ghqFind: async () => ghqResults.shift() ?? null,
@@ -19,6 +23,10 @@ mock.module("maw-js/sdk", () => ({
   listSessions: async () => {
     if (listSessionsThrows) throw new Error("tmux unavailable");
     return sessions;
+  },
+  curlFetch: async (url: string, options: any) => {
+    curlFetchCalls.push({ url, options });
+    return curlFetchQueue.shift() ?? { ok: true, status: 200, data: { sessions: [] } };
   },
 }));
 mock.module("maw-js/commands/shared/fleet-load", () => ({
@@ -65,6 +73,9 @@ describe("locate command implementation coverage", () => {
   let repoDir: string;
 
   beforeEach(() => {
+    originalPeersFile = process.env.PEERS_FILE;
+    process.env.PEERS_FILE = peersFile;
+    writeFileSync(peersFile, JSON.stringify({ peers: {} }), "utf-8");
     rmSync(fleetDir, { recursive: true, force: true });
     mkdirSync(fleetDir, { recursive: true });
     repoDir = mkdtempSync(join(tmpdir(), "maw-locate-repo-"));
@@ -73,11 +84,16 @@ describe("locate command implementation coverage", () => {
     resolved = { kind: "none" };
     config = { node: "local-node" };
     listSessionsThrows = false;
+    curlFetchCalls = [];
+    curlFetchQueue = [];
   });
 
   afterEach(() => {
     rmSync(repoDir, { recursive: true, force: true });
     rmSync(fleetDir, { recursive: true, force: true });
+    rmSync(peersFile, { force: true });
+    if (originalPeersFile === undefined) delete process.env.PEERS_FILE;
+    else process.env.PEERS_FILE = originalPeersFile;
   });
 
   test("requires an oracle name and prints usage to stderr", async () => {
@@ -139,6 +155,55 @@ describe("locate command implementation coverage", () => {
     resolved = { kind: "exact", match: sessions[0] };
 
     await expect(cmdLocate("solo", { path: true })).rejects.toThrow("no repo path for 'solo' (session: solo, fleet: yes)");
+  });
+
+  test("scans federation peers and reports matching remote sessions", async () => {
+    ghqResults = [null, null];
+    writeFileSync(peersFile, JSON.stringify({
+      peers: { alpha: { url: "http://alpha.wg:3461", node: "alpha" } },
+    }), "utf-8");
+    curlFetchQueue = [{
+      ok: true,
+      status: 200,
+      data: {
+        alias: "alpha",
+        node: "alpha",
+        url: "http://alpha.wg:3461",
+        sessions: [
+          { name: "05-volt", windows: [{ index: 1, name: "volt-oracle", active: true }] },
+          { name: "09-other", windows: [] },
+        ],
+      },
+    }];
+
+    const output = await capture(() => cmdLocate("volt", {}));
+    const text = output.logs.join("\n");
+
+    expect(curlFetchCalls[0]?.url).toBe("http://alpha.wg:3461/api/ls");
+    expect(text).toContain("remote:   alpha:05-volt (http://alpha.wg:3461) (1 window)");
+  });
+
+  test("json mode includes federation hits", async () => {
+    ghqResults = [null, null];
+    writeFileSync(peersFile, JSON.stringify({
+      peers: { alpha: { url: "http://alpha.wg:3461", node: "alpha" } },
+    }), "utf-8");
+    curlFetchQueue = [{
+      ok: true,
+      status: 200,
+      data: { sessions: [{ name: "05-volt", windows: [{ index: 1, name: "volt-oracle" }] }] },
+    }];
+
+    const output = await capture(() => cmdLocate("volt", { json: true }));
+    const parsed = JSON.parse(output.logs.join("\n"));
+
+    expect(parsed.federation).toEqual([{
+      alias: "alpha",
+      node: "alpha",
+      url: "http://alpha.wg:3461",
+      sessionName: "05-volt",
+      windowCount: 1,
+    }]);
   });
 
   test("default output omits missing fields and labels this-node federation fallback", async () => {

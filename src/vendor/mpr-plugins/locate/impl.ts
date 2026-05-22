@@ -19,6 +19,8 @@ import { loadFleetEntries, type FleetEntry } from "maw-js/commands/shared/fleet-
 import { loadConfig } from "maw-js/config";
 import { resolveSessionTarget } from "maw-js/core/matcher/resolve-target";
 import { UserError } from "maw-js/core/util/user-error";
+import { fetchPeerPayload, type PeerSession } from "../ls/internal/peer-call";
+import { resolveAllPeers } from "../ls/internal/peer-resolve";
 
 export interface LocateOpts {
   path?: boolean;
@@ -34,6 +36,55 @@ interface LocateResult {
   fleetConfigPath: string | null;
   federationNode: string | null;
   inAgentsConfig: boolean;
+  federation: LocateFederationHit[];
+}
+
+interface LocateFederationHit {
+  alias: string;
+  node: string | null;
+  url: string | null;
+  sessionName: string;
+  windowCount: number;
+}
+
+function normalizedNames(name: string): string[] {
+  const raw = name.trim().toLowerCase();
+  const unnumbered = raw.replace(/^\d+-/, "");
+  return [...new Set([
+    raw,
+    raw.replace(/-oracle$/, ""),
+    unnumbered,
+    unnumbered.replace(/-oracle$/, ""),
+  ].filter(Boolean))];
+}
+
+function peerSessionMatches(session: PeerSession, oracle: string): boolean {
+  const wanted = new Set(normalizedNames(oracle));
+  const sessionNames = normalizedNames(session.name);
+  if (sessionNames.some(name => wanted.has(name))) return true;
+  return (session.windows ?? []).some((w) => normalizedNames(w.name).some(name => wanted.has(name)));
+}
+
+async function findFederationHits(oracle: string): Promise<LocateFederationHit[]> {
+  const peers = resolveAllPeers();
+  if (!peers.length) return [];
+
+  const payloads = await Promise.all(peers.map(peer => fetchPeerPayload(peer, 2000)));
+  const hits: LocateFederationHit[] = [];
+  for (const payload of payloads) {
+    if (payload.error) continue;
+    for (const session of payload.sessions ?? []) {
+      if (!peerSessionMatches(session, oracle)) continue;
+      hits.push({
+        alias: payload.alias ?? payload.node ?? "peer",
+        node: payload.node ?? null,
+        url: payload.url ?? null,
+        sessionName: session.name,
+        windowCount: session.windows?.length ?? 0,
+      });
+    }
+  }
+  return hits;
 }
 
 function fleetEntryMatches(entry: FleetEntry, names: Set<string>): boolean {
@@ -58,7 +109,7 @@ function findFleetConfigPath(oracle: string, sessionName: string | null): string
   return null;
 }
 
-async function gatherInfo(oracle: string): Promise<LocateResult> {
+async function gatherInfo(oracle: string, opts: { scanFederation?: boolean } = {}): Promise<LocateResult> {
   // ghq repo path — try `<name>-oracle` suffix first (canonical), then bare name
   const repoPath =
     (await ghqFind(`/${oracle}-oracle`)) ?? (await ghqFind(`/${oracle}`));
@@ -91,6 +142,8 @@ async function gatherInfo(oracle: string): Promise<LocateResult> {
   const inAgentsConfig = oracle in agents;
   const federationNode = inAgentsConfig ? agents[oracle]! : (config.node ?? null);
 
+  const federation = opts.scanFederation === false ? [] : await findFederationHits(oracle);
+
   return {
     name: oracle,
     repoPath,
@@ -100,6 +153,7 @@ async function gatherInfo(oracle: string): Promise<LocateResult> {
     fleetConfigPath,
     federationNode,
     inAgentsConfig,
+    federation,
   };
 }
 
@@ -110,10 +164,10 @@ export async function cmdLocate(oracle: string | undefined, opts: LocateOpts = {
     throw new UserError("missing oracle name");
   }
 
-  const info = await gatherInfo(oracle);
+  const info = await gatherInfo(oracle, { scanFederation: !opts.path });
 
   // Nothing found at all → not-found error (mirrors alpha.75 oracle-about fix)
-  if (!info.repoPath && !info.sessionName && !info.fleetConfigPath) {
+  if (!info.repoPath && !info.sessionName && !info.fleetConfigPath && info.federation.length === 0) {
     throw new UserError(`no oracle named '${oracle}' — try: maw oracle ls`);
   }
 
@@ -149,6 +203,11 @@ export async function cmdLocate(oracle: string | undefined, opts: LocateOpts = {
   if (info.federationNode) {
     const suffix = info.inAgentsConfig ? " (from config.agents)" : " (this node)";
     console.log(`   node:     ${info.federationNode}${suffix}`);
+  }
+  for (const hit of info.federation) {
+    const label = hit.node ?? hit.alias;
+    const location = hit.url ? ` (${hit.url})` : "";
+    console.log(`   remote:   ${label}:${hit.sessionName}${location} (${hit.windowCount} window${hit.windowCount === 1 ? "" : "s"})`);
   }
   console.log();
 }

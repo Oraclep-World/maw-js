@@ -97,6 +97,12 @@ export function resolveTarget(
     return { type: "local", target: localTarget };
   }
 
+  // A forwarded /api/send target such as `volt-oracle:1` is a local
+  // session/window alias on the receiving node, not a remote node named
+  // `volt-oracle`. Try that explicit tmux shape before node-prefix routing.
+  const localSessionWindowAlias = resolveSessionWindowAliasTarget(query, writable, "local");
+  if (localSessionWindowAlias) return localSessionWindowAlias;
+
   // --- Step 2: Node:prefix syntax (e.g. "mba:homekeeper") ---
   if (query.includes(":") && !query.includes("/")) {
     const colonIdx = query.indexOf(":");
@@ -116,6 +122,8 @@ export function resolveTarget(
       }
       const sessionAliasResult = resolveSessionAliasWindowTarget(agentName, writable, "self-node");
       if (sessionAliasResult) return sessionAliasResult;
+      const sessionWindowAliasResult = resolveSessionWindowAliasTarget(agentName, writable, "self-node");
+      if (sessionWindowAliasResult) return sessionWindowAliasResult;
       const selfTarget = findWindow(writable, agentName);
       if (selfTarget) return { type: "self-node", target: selfTarget };
       return { type: "error", reason: "self_not_running", detail: `'${agentName}' not found in local sessions on ${selfNode}`, hint: `maw wake ${agentName}` };
@@ -207,6 +215,58 @@ function resolveFleetWindowTarget(
     reason: "fleet_window_not_found",
     detail: `'${query}' matched fleet session '${fleetSession}', but no window named ${candidateNames.map((n) => `'${n}'`).join(" or ")} was found; refusing to default to the first window`,
     hint: `candidates: ${candidates}`,
+  };
+}
+
+function resolveSessionWindowAliasTarget(
+  query: string,
+  writable: Session[],
+  routeType: FleetRouteType,
+): FleetWindowResult | null {
+  const match = query.trim().match(/^([^:]+):(\d+)(?:\.(\d+))?$/);
+  if (!match) return null;
+
+  const [, sessionQuery, rawWindowIndex, paneIndex] = match;
+  const wanted = new Set(sessionAliasNames(sessionQuery).map((name) => name.toLowerCase()));
+  if (!wanted.size) return null;
+
+  let matches = writable.filter((s) =>
+    sessionAliasNames(s.name).some((name) => wanted.has(name.toLowerCase())),
+  );
+  if (!matches.length) return null;
+
+  if (matches.length > 1) {
+    const normalizedQuery = sessionQuery.trim().toLowerCase();
+    const exactUnnumbered = matches.filter((s) =>
+      s.name.trim().replace(/^\d+-/, "").toLowerCase() === normalizedQuery,
+    );
+    if (exactUnnumbered.length === 1) matches = exactUnnumbered;
+  }
+
+  if (matches.length > 1) {
+    return {
+      type: "error",
+      reason: "session_alias_ambiguous",
+      detail: `'${sessionQuery}' matches multiple local sessions; refusing to guess a window`,
+      hint: `candidates: ${matches.map((s) => s.name).join(", ")}`,
+    };
+  }
+
+  const session = matches[0];
+  const windowIndex = Number(rawWindowIndex);
+  const window = session.windows.find((w) => w.index === windowIndex);
+  if (!window) {
+    return {
+      type: "error",
+      reason: "session_window_index_not_found",
+      detail: `'${sessionQuery}' matched local session '${session.name}', but window ${rawWindowIndex} was not found`,
+      hint: `candidates: ${session.windows.map((w) => `${session.name}:${w.index} (${w.name})`).join(", ") || "none"}`,
+    };
+  }
+
+  return {
+    type: routeType,
+    target: `${session.name}:${window.index}${paneIndex ? `.${paneIndex}` : ""}`,
   };
 }
 

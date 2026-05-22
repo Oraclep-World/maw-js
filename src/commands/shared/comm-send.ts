@@ -397,7 +397,8 @@ export async function cmdSend(
     const parts = query.split(":");
     const targetNode = parts.length >= 2 ? parts[0] : null;
     const bareAgent = parts.length >= 2 ? parts[1] : query;
-    const isCanonical = parts.length >= 3 || (parts.length === 2 && isTmuxSessionIdTarget(bareAgent));
+    const isExplicitRemoteSession = parts.length === 2 && /-oracle$/i.test(bareAgent);
+    const isCanonical = parts.length >= 3 || (parts.length === 2 && (isTmuxSessionIdTarget(bareAgent) || isExplicitRemoteSession));
     const isLocalScope = !targetNode || targetNode === config.node || targetNode === "local";
     if (isLocalScope && bareAgent && !isCanonical) {
       const hasLocalSession = sessions.some(s =>
