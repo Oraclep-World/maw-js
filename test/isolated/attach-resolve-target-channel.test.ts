@@ -85,6 +85,36 @@ describe("attach resolver channel-session filtering", () => {
     expect(result).toEqual({ tier: 1, sessionName: "77-mawjs" });
   });
 
+  test("prefers a fleet-numbered live session over an orphan suffix match", async () => {
+    const result = await resolveAttachTarget("mawjs", {
+      listSessions: async () => [
+        { name: "77-mawjs", windows: [{ name: "mawjs-oracle" }] },
+        { name: "cnx-mawjs", windows: [{ name: "main" }] },
+      ],
+      loadFleet: () => [
+        { name: "77-mawjs", windows: [{ name: "mawjs-oracle" }] },
+      ],
+    });
+
+    expect(result).toEqual({ tier: 1, sessionName: "77-mawjs" });
+  });
+
+  test("keeps live matches ambiguous when multiple numbered sessions match", async () => {
+    const result = await resolveAttachTarget("mawjs", {
+      listSessions: async () => [
+        { name: "77-mawjs", windows: [{ name: "mawjs-oracle" }] },
+        { name: "78-mawjs-backup", windows: [{ name: "mawjs-oracle" }] },
+      ],
+      loadFleet: () => [],
+    });
+
+    expect(result).toEqual({
+      tier: 1,
+      sessionName: "77-mawjs",
+      ambiguousCandidates: ["77-mawjs", "78-mawjs-backup"],
+    });
+  });
+
   test("falls back to a single sleeping fleet match when no session matches", async () => {
     const result = await resolveAttachTarget("homekeeper", {
       listSessions: async () => [],

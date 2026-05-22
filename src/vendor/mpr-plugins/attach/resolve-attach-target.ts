@@ -256,6 +256,32 @@ function runningMatchFor(session: SessionLike, target: string, fuzzy: boolean): 
   return null;
 }
 
+function isNumberedFleetStyleSessionName(name: string): boolean {
+  return /^\d+-/.test(name);
+}
+
+function isFleetRegisteredSession(session: SessionLike, fleet: FleetLike[]): boolean {
+  const sessionName = session.name.toLowerCase();
+  return fleet.some(entry => entry.name.toLowerCase() === sessionName);
+}
+
+function preferredTrustedRunningMatch(
+  matches: Array<{ session: SessionLike; windowName?: string }>,
+  fleet: FleetLike[],
+): { session: SessionLike; windowName?: string } | null {
+  const fleetRegistered = matches.filter(match => isFleetRegisteredSession(match.session, fleet));
+  if (fleetRegistered.length === 1) return fleetRegistered[0];
+
+  // Fleet-created sessions use a numeric slot prefix (`77-mawjs`). If one live
+  // numbered match is competing only with orphan/ad-hoc suffix matches
+  // (`cnx-mawjs`), trust the fleet-style session instead of surfacing a false
+  // ambiguity (#1895). Multiple numbered matches stay ambiguous.
+  const numbered = matches.filter(match => isNumberedFleetStyleSessionName(match.session.name));
+  if (numbered.length === 1) return numbered[0];
+
+  return null;
+}
+
 async function listFederatedRemoteSessions(): Promise<RemoteSessionNodeLike[]> {
   const [{ resolveAllPeers }, { fetchPeerPayload }] = await Promise.all([
     import("../ls/internal/peer-resolve"),
@@ -368,6 +394,14 @@ export async function resolveAttachTarget(
         tier: 1,
         sessionName: match.session.name,
         ...(match.windowName ? { windowName: match.windowName } : {}),
+      };
+    }
+    const trustedMatch = preferredTrustedRunningMatch(runningMatches, deps.loadFleet());
+    if (trustedMatch) {
+      return {
+        tier: 1,
+        sessionName: trustedMatch.session.name,
+        ...(trustedMatch.windowName ? { windowName: trustedMatch.windowName } : {}),
       };
     }
     return {
