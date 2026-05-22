@@ -81,6 +81,92 @@ export function resolveMyName(config: ReturnType<typeof loadConfig>): string {
   return config.node || "cli";
 }
 
+export interface SenderIdentity {
+  /** Human-facing node name used in visible `[node:oracle]` message prefixes. */
+  node: string;
+  /** Human-facing oracle/session name used in visible `[node:oracle]` message prefixes. */
+  oracle: string;
+  /** `node:oracle`, the form operators type with `--from` / `MAW_SENDER`. */
+  display: string;
+  /** `oracle:node`, the existing v3 from-signing wire form. */
+  wireFrom: string | "auto";
+  /** Back-compat name for message log rows. */
+  senderName: string;
+  source: "auto" | "flag" | "env";
+}
+
+const SENDER_PART_RE = /^[A-Za-z0-9_.-]+$/;
+
+/** @internal exported for tests. Parse user-facing `<node>:<oracle>` sender overrides. */
+export function parseSenderOverride(raw: string | undefined | null): Pick<SenderIdentity, "node" | "oracle" | "display" | "wireFrom" | "senderName"> | null {
+  const value = (raw ?? "").trim();
+  if (!value) return null;
+  const parts = value.split(":");
+  if (parts.length !== 2) return null;
+  const [node, oracle] = parts.map((part) => part.trim());
+  if (!node || !oracle) return null;
+  if (!SENDER_PART_RE.test(node) || !SENDER_PART_RE.test(oracle)) return null;
+  return {
+    node,
+    oracle,
+    display: `${node}:${oracle}`,
+    // Existing from-signing contract is `<oracle>:<node>` even though human
+    // message attribution is `[node:oracle]`. Keep both explicit.
+    wireFrom: `${oracle}:${node}`,
+    senderName: oracle,
+  };
+}
+
+/** @internal exported for tests. */
+export function hasSshRelayEnv(env: NodeJS.ProcessEnv = process.env): boolean {
+  return Boolean(env.SSH_CLIENT || env.SSH_CONNECTION || env.SSH_TTY);
+}
+
+/**
+ * Resolve the visible + signed sender for `maw hey`.
+ *
+ * Precedence for #1889:
+ *   1. CLI `--from <node:oracle>`
+ *   2. `MAW_SENDER=<node:oracle>` for SSH relay wrappers
+ *   3. Auto local identity, but only when not running under SSH relay env
+ */
+export function resolveSenderIdentity(
+  config: ReturnType<typeof loadConfig>,
+  opts: Pick<CmdSendOptions, "from"> = {},
+  env: NodeJS.ProcessEnv = process.env,
+): SenderIdentity {
+  const explicit = opts.from?.trim();
+  const envSender = env.MAW_SENDER?.trim();
+  const raw = explicit || envSender;
+  if (raw) {
+    const parsed = parseSenderOverride(raw);
+    if (!parsed) throw new Error(`invalid sender '${raw}' (expected <node>:<oracle>)`);
+    return { ...parsed, source: explicit ? "flag" : "env" };
+  }
+
+  if (hasSshRelayEnv(env)) {
+    throw new Error("refusing to stamp SSH-relayed maw hey as the local oracle; set --from <node:oracle> or MAW_SENDER=<node:oracle>");
+  }
+
+  const senderName = resolveMyName(config);
+  const node = config.node || "local";
+  return {
+    node,
+    oracle: senderName,
+    display: `${node}:${senderName}`,
+    wireFrom: "auto",
+    senderName,
+    source: "auto",
+  };
+}
+
+function rejectSenderIdentity(error: unknown): never {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`\x1b[31merror\x1b[0m: ${message}`);
+  console.error("\x1b[33mhint\x1b[0m:  use `maw hey --from alpha:volt-oracle <target> <message>` or set `MAW_SENDER=alpha:volt-oracle`");
+  process.exit(1);
+}
+
 /**
  * Visible internal federation attribution.
  *
@@ -294,11 +380,14 @@ function assertBareLocalTarget(
  *   either direction skip the gate without operator intervention.
  * - `inboxOnly` (#1860): persist to the receiver inbox without injecting
  *   into the live pane. Normal sends now always inject by default.
+ * - `from` (#1889): explicit user-facing sender override, `<node>:<oracle>`,
+ *   used for SSH relays where auto local identity would impersonate the host.
  */
 export interface CmdSendOptions {
   approve?: boolean;
   trust?: boolean;
   inboxOnly?: boolean;
+  from?: string;
   receiverInbox?: ReceiverInboxWriter | false;
 }
 
@@ -309,6 +398,12 @@ export async function cmdSend(
   opts: CmdSendOptions = {},
 ) {
   const config = loadConfig();
+  let senderIdentity: SenderIdentity;
+  try {
+    senderIdentity = resolveSenderIdentity(config, opts);
+  } catch (error) {
+    rejectSenderIdentity(error);
+  }
 
   // --- Team fan-out routing: maw hey team:<team-name> <msg> (#627) ---
   if (query.startsWith("team:")) {
@@ -318,7 +413,7 @@ export async function cmdSend(
       process.exit(1);
     }
     const { getOracleMembers, loadOracleRegistry } = await import("../../lib/oracle-members");
-    const senderOracle = resolveMyName(config);
+    const senderOracle = senderIdentity.senderName;
     const members = getOracleMembers(teamName, senderOracle);
     if (members.length === 0) {
       const registry = loadOracleRegistry(teamName);
@@ -371,7 +466,7 @@ export async function cmdSend(
     const { discoverPackages, invokePlugin } = await import("../../plugin/registry");
     const plugin = discoverPackages().find(p => p.manifest.name === name);
     if (!plugin) { console.error(`plugin not found: ${name}`); process.exit(1); }
-    const result = await invokePlugin(plugin, { source: "peer", args: { message, from: config.node ?? "local" } });
+    const result = await invokePlugin(plugin, { source: "peer", args: { message, from: senderIdentity.display } });
     if (result.ok) { console.log(result.output ?? "(no output)"); return; }
     console.error(`plugin error: ${result.error}`);
     process.exit(1);
@@ -457,7 +552,7 @@ export async function cmdSend(
           const wakeRes = await curlFetch(`${peer.url}/api/wake`, {
             method: "POST",
             body: JSON.stringify({ target: bareAgent }),
-            from: "auto", // #804 Step 4 SIGN — sign cross-node /api/wake
+            from: senderIdentity.wireFrom, // #804 Step 4 SIGN — sign cross-node /api/wake
           });
           if (!wakeRes.ok || !wakeRes.data?.ok) {
             const underlying = wakeRes.data?.error || (wakeRes.status ? `HTTP ${wakeRes.status}` : "connection failed");
@@ -509,7 +604,7 @@ export async function cmdSend(
       // pre-#642 setups working unchanged. Operators opt in to the gate
       // by creating their first scope via `maw scope create`.
       if (scopes.length > 0) {
-        const senderOracle = config.oracle ?? "mawjs";
+        const senderOracle = senderIdentity.senderName;
         const targetOracle = result.target; // agent name from `<node>:<agent>`
         const decision = evaluateAclFromDisk(senderOracle, targetOracle);
         if (decision === "queue") {
@@ -546,7 +641,7 @@ export async function cmdSend(
   if (opts.approve && opts.trust && result?.type === "peer") {
     try {
       const { cmdAdd } = await import("../../lib/trust-store");
-      const senderOracle = config.oracle ?? "mawjs";
+      const senderOracle = senderIdentity.senderName;
       const targetOracle = result.target;
       cmdAdd(senderOracle, targetOracle);
       console.log(
@@ -574,8 +669,8 @@ export async function cmdSend(
     }
   }
 
-  const senderName = resolveMyName(config);
-  const outboundMessage = formatSignedMessage(message, config, senderName);
+  const senderName = senderIdentity.senderName;
+  const outboundMessage = formatSignedMessage(message, { node: senderIdentity.node }, senderName);
   const receiverInboxWriter = opts.receiverInbox === false
     ? null
     : opts.receiverInbox ?? defaultReceiverInboxWriter();
@@ -586,7 +681,7 @@ export async function cmdSend(
         query,
         target,
         to: query,
-        from: `${config.node ?? "local"}:${senderName}`,
+        from: senderIdentity.display,
         message: outboundMessage,
         config,
       });
@@ -602,7 +697,7 @@ export async function cmdSend(
       state: "queued",
       channel: "hey",
       route: "inbox",
-      from: `${config.node ?? "local"}:${senderName}`,
+      from: senderIdentity.display,
       to: query,
       target,
       text: outboundMessage,
@@ -641,7 +736,7 @@ export async function cmdSend(
       state: "delivered",
       channel: "hey",
       route: "local",
-      from: `${config.node}:${senderName}`,
+      from: senderIdentity.display,
       to: query,
       target,
       text: outboundMessage,
@@ -658,7 +753,7 @@ export async function cmdSend(
     const res = await curlFetch(`${result.peerUrl}/api/send`, {
       method: "POST",
       body: JSON.stringify({ target: result.target, text: outboundMessage, ...(opts.inboxOnly ? { inbox: true } : {}) }),
-      from: "auto", // #804 Step 4 SIGN — sign cross-node /api/send
+      from: senderIdentity.wireFrom, // #804 Step 4 SIGN — sign cross-node /api/send
     });
     if (res.ok && res.data?.ok) {
       const state = res.data.state === "delivered" ? "delivered" : "queued";
@@ -668,7 +763,7 @@ export async function cmdSend(
         state,
         channel: "hey",
         route: "peer",
-        from: `${config.node!}:${senderName}`,
+        from: senderIdentity.display,
         to: `${result.node}:${result.target}`,
         target: res.data.target || result.target,
         peerUrl: result.peerUrl,
@@ -688,7 +783,7 @@ export async function cmdSend(
       state: "failed",
       channel: "hey",
       route: "peer",
-      from: `${config.node ?? "local"}:${senderName}`,
+      from: senderIdentity.display,
       to: `${result.node}:${result.target}`,
       target: result.target,
       peerUrl: result.peerUrl,
@@ -709,7 +804,7 @@ export async function cmdSend(
     const res = await curlFetch(`${peerUrl}/api/send`, {
       method: "POST",
       body: JSON.stringify({ target: query, text: outboundMessage, ...(opts.inboxOnly ? { inbox: true } : {}) }),
-      from: "auto", // #804 Step 4 SIGN — sign discovery-fallback /api/send
+      from: senderIdentity.wireFrom, // #804 Step 4 SIGN — sign discovery-fallback /api/send
     });
     if (res.ok && res.data?.ok) {
       const state = res.data.state === "delivered" ? "delivered" : "queued";
@@ -719,7 +814,7 @@ export async function cmdSend(
         state,
         channel: "hey",
         route: "discovery",
-        from: `${config.node ?? "local"}:${senderName}`,
+        from: senderIdentity.display,
         to: query,
         target: res.data.target || query,
         peerUrl,
@@ -741,7 +836,7 @@ export async function cmdSend(
       state: "failed",
       channel: "hey",
       route: "discovery",
-      from: `${config.node ?? "local"}:${senderName}`,
+      from: senderIdentity.display,
       to: query,
       target: query,
       peerUrl,

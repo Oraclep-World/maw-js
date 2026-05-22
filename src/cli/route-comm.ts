@@ -2,8 +2,9 @@ import { cmdPeek, cmdSend } from "../commands/shared/comm";
 import { UserError } from "../core/util/user-error";
 
 function printCommUsage(cmd: "hey" | "send", write: (line: string) => void = console.log): void {
-  write(`usage: maw ${cmd} <target> <message> [--inbox] [--force deprecated] [--approve] [--trust]`);
+  write(`usage: maw ${cmd} [--from <node:oracle>] <target> <message> [--inbox] [--force deprecated] [--approve] [--trust]`);
   write("  default: write receiver inbox and inject into the target pane");
+  write("  --from <node:oracle>: explicit sender for SSH relays; env fallback: MAW_SENDER");
   write("  --inbox: write receiver inbox only; skip pane injection");
   write("  --force: deprecated compatibility alias; delivery is already forced by default");
   write("  target forms:");
@@ -36,19 +37,49 @@ export async function routeComm(cmd: string, args: string[]): Promise<boolean> {
       return true;
     }
 
-    const force = args.includes("--force");
-    const inboxOnly = args.includes("--inbox");
+    const rest = args.slice(1);
+    let force = false;
+    let inboxOnly = false;
     // #842 Sub-C — `--approve` bypasses the cross-scope ACL queue gate.
     // Operator-explicit opt-in for THIS message; mirrors the consent
     // `--pin` escape hatch already wired in #644. Optional `--trust`
     // pairs with `--approve` to also persist the sender↔target trust
     // entry so the same pair stops queuing on subsequent sends.
-    const approve = args.includes("--approve");
-    const trust = args.includes("--trust");
-    const target = args[1];
-    const msgArgs = args
-      .slice(2)
-      .filter(a => a !== "--force" && a !== "--inbox" && a !== "--approve" && a !== "--trust");
+    let approve = false;
+    let trust = false;
+    let from: string | undefined;
+    let target: string | undefined;
+    const msgArgs: string[] = [];
+
+    for (let i = 0; i < rest.length; i += 1) {
+      const arg = rest[i];
+      if (arg === "--force") { force = true; continue; }
+      if (arg === "--inbox") { inboxOnly = true; continue; }
+      if (arg === "--approve") { approve = true; continue; }
+      if (arg === "--trust") { trust = true; continue; }
+      if (arg === "--from") {
+        if (!rest[i + 1] || rest[i + 1].startsWith("--")) {
+          console.error("✗ missing value for --from");
+          console.error(`  maw ${cmd} --from <node:oracle> <target> <message>`);
+          throw new UserError("missing value for --from");
+        }
+        from = rest[i + 1];
+        i += 1;
+        continue;
+      }
+      if (arg.startsWith("--from=")) {
+        from = arg.slice("--from=".length);
+        continue;
+      }
+      if (!target) target = arg;
+      else msgArgs.push(arg);
+    }
+
+    if (from !== undefined && !from.trim()) {
+      console.error("✗ missing value for --from");
+      console.error(`  maw ${cmd} --from <node:oracle> <target> <message>`);
+      throw new UserError("missing value for --from");
+    }
 
     // Distinguish: zero-args usage error vs missing-message error (#388.3)
     // A user who typed `maw hey mawjs` (just the target, no message) was
@@ -68,7 +99,7 @@ export async function routeComm(cmd: string, args: string[]): Promise<boolean> {
     if (force) {
       console.error("\x1b[90mnote: --force is deprecated; maw hey delivers by default. Use --inbox to queue without pane injection.\x1b[0m");
     }
-    await cmdSend(target, msgArgs.join(" "), force, { approve, trust, inboxOnly });
+    await cmdSend(target, msgArgs.join(" "), force, { approve, trust, inboxOnly, ...(from ? { from } : {}) });
     return true;
   }
   return false;

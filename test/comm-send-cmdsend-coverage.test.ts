@@ -209,6 +209,10 @@ const origErr = console.error;
 const origLog = console.log;
 const origAgentName = process.env.CLAUDE_AGENT_NAME;
 const origTestMode = process.env.MAW_TEST_MODE;
+const origMawSender = process.env.MAW_SENDER;
+const origSshClient = process.env.SSH_CLIENT;
+const origSshConnection = process.env.SSH_CONNECTION;
+const origSshTty = process.env.SSH_TTY;
 
 (Bun as unknown as { sleep: (ms: number) => Promise<void> }).sleep = async (ms: number) => {
   if (mockActive) sleepCalls.push(ms);
@@ -280,6 +284,10 @@ beforeEach(() => {
   delete process.env.MAW_CONSENT;
   delete process.env.MAW_ACL_BYPASS;
   delete process.env.MAW_HEY_INBOX_AUTOWRITE;
+  delete process.env.MAW_SENDER;
+  delete process.env.SSH_CLIENT;
+  delete process.env.SSH_CONNECTION;
+  delete process.env.SSH_TTY;
 });
 
 afterEach(() => {
@@ -291,6 +299,14 @@ afterEach(() => {
   else process.env.CLAUDE_AGENT_NAME = origAgentName;
   if (origTestMode === undefined) delete process.env.MAW_TEST_MODE;
   else process.env.MAW_TEST_MODE = origTestMode;
+  if (origMawSender === undefined) delete process.env.MAW_SENDER;
+  else process.env.MAW_SENDER = origMawSender;
+  if (origSshClient === undefined) delete process.env.SSH_CLIENT;
+  else process.env.SSH_CLIENT = origSshClient;
+  if (origSshConnection === undefined) delete process.env.SSH_CONNECTION;
+  else process.env.SSH_CONNECTION = origSshConnection;
+  if (origSshTty === undefined) delete process.env.SSH_TTY;
+  else process.env.SSH_TTY = origSshTty;
 });
 
 afterAll(() => {
@@ -314,6 +330,37 @@ describe("cmdSend — delivery branch coverage", () => {
     expect(emitFeedCalls[0].data.route).toBe("local");
     expect(logs.join("\n")).toContain("delivered");
     expect(logs.join("\n")).toContain("accepted");
+  });
+
+  test("explicit --from stamps visible message and feed as the relay sender", async () => {
+    captureResponses = ["accepted"];
+    await runCmd(() => cmdSend("local:session:oracle", "hello", false, { from: "alpha:volt-oracle" }));
+
+    expect(exitCode).toBeUndefined();
+    expect(sendKeysCalls).toEqual([{ target: "session:oracle.0", text: "[alpha:volt-oracle] hello" }]);
+    expect(logMessageCalls).toEqual([{ from: "volt-oracle", to: "local:session:oracle", message: "[alpha:volt-oracle] hello", route: "local" }]);
+    expect(emitFeedCalls[0].data.from).toBe("alpha:volt-oracle");
+  });
+
+  test("SSH relay without --from or MAW_SENDER refuses local impersonation", async () => {
+    process.env.SSH_CONNECTION = "10.20.0.7 12345 10.20.0.5 22";
+
+    await runCmd(() => cmdSend("local:session:oracle", "hello"));
+
+    expect(exitCode).toBe(1);
+    expect(sendKeysCalls).toEqual([]);
+    expect(errs.join("\n")).toContain("SSH-relayed");
+    expect(errs.join("\n")).toContain("--from alpha:volt-oracle");
+  });
+
+  test("MAW_SENDER allows SSH relay wrappers and signs as remote sender", async () => {
+    process.env.SSH_CLIENT = "10.20.0.7 12345 22";
+    process.env.MAW_SENDER = "alpha:volt-oracle";
+
+    await runCmd(() => cmdSend("local:session:oracle", "hello"));
+
+    expect(exitCode).toBeUndefined();
+    expect(sendKeysCalls).toEqual([{ target: "session:oracle.0", text: "[alpha:volt-oracle] hello" }]);
   });
 
   test("local delivery mirrors delivered hey messages into the receiver inbox when enabled", async () => {
@@ -446,6 +493,7 @@ describe("cmdSend — delivery branch coverage", () => {
     expect(exitCode).toBeUndefined();
     expect(curlFetchCalls).toHaveLength(1);
     expect(curlFetchCalls[0].url).toBe("http://remote:3456/api/send");
+    expect(curlFetchCalls[0].options.from).toBe("auto");
     expect(JSON.parse(curlFetchCalls[0].options.body)).toEqual({ target: "oracle", text: "[test-node:sender] ping" });
     expect(logMessageCalls[0].route).toBe("peer:remote");
     expect(emitFeedCalls[0].data.route).toBe("peer");
@@ -453,6 +501,17 @@ describe("cmdSend — delivery branch coverage", () => {
     expect(logs.join("\n")).toContain("queued");
     expect(logs.join("\n")).not.toContain("delivered");
     expect(runHookCalls[0].name).toBe("after_send");
+  });
+
+  test("peer delivery uses explicit sender override for message body and v3 from-signing", async () => {
+    resolveTargetReturn = { type: "peer", target: "oracle", node: "remote", peerUrl: "http://remote:3456" };
+
+    await runCmd(() => cmdSend("remote:session:oracle", "ping", false, { from: "alpha:volt-oracle" }));
+
+    expect(exitCode).toBeUndefined();
+    expect(curlFetchCalls[0].options.from).toBe("volt-oracle:alpha");
+    expect(JSON.parse(curlFetchCalls[0].options.body)).toEqual({ target: "oracle", text: "[alpha:volt-oracle] ping" });
+    expect(emitFeedCalls[0].data.from).toBe("alpha:volt-oracle");
   });
 
   test("peer delivery failures emit a failed lifecycle event and exit", async () => {
