@@ -14,7 +14,7 @@ import { runWakeLifecycleHooks } from "../../plugin/lifecycle";
 import { parseWakeTarget, ensureCloned } from "./wake-target";
 import { assertAgentCapacity } from "./wake-concurrency";
 import { latestSnapshot, loadSnapshot, type Snapshot, type SnapshotSession } from "../../core/fleet/snapshot";
-import { loadFleet, type FleetSession } from "./fleet-load";
+import type { FleetSession } from "./fleet-load";
 import { listClaudeSessions, type ClaudeSession } from "../../core/fleet/claude-sessions";
 import { UserError } from "../../core/util/user-error";
 import {
@@ -582,7 +582,7 @@ function primaryFleetOracleWindow(session: FleetSession): { name: string; repo: 
 
 export function resolveWakeFleetSessionMetadata(
   sessionName: string,
-  fleetSessions: FleetSession[] = loadFleet(),
+  fleetSessions: FleetSession[],
 ): WakeFleetSessionMetadata | null {
   const session = fleetSessions.find(s => s.name === sessionName);
   if (!session) return null;
@@ -597,6 +597,19 @@ export function resolveWakeFleetSessionMetadata(
     windowName: window.name,
     repo: normalizeFleetRepoSlug(window.repo),
   };
+}
+
+async function loadWakeFleetSessions(): Promise<FleetSession[]> {
+  try {
+    const { loadFleet } = await import("./fleet-load");
+    return loadFleet();
+  } catch {
+    // Some isolated tests mock the SDK facade narrowly and intentionally omit
+    // fleet constants. Fleet metadata is an optimization for exact numeric
+    // targets, so a load failure should fall back to the pre-#1892 resolver
+    // path rather than breaking ordinary wake paths.
+    return [];
+  }
 }
 
 async function resolveWakeFleetSessionRepo(meta: WakeFleetSessionMetadata): Promise<{ repoPath: string; repoName: string; parentDir: string }> {
@@ -677,7 +690,7 @@ export async function cmdWake(oracle: string, opts: WakeOptions): Promise<string
     // through local repos; that can match sibling repos such as `mawjs-oracle`.
     // Preserve the fleet window stem for tmux names and resolve the fleet-
     // pinned repo directly below.
-    preResolvedFleetSession = resolveWakeFleetSessionMetadata(oracle);
+    preResolvedFleetSession = resolveWakeFleetSessionMetadata(oracle, await loadWakeFleetSessions());
     if (preResolvedFleetSession) {
       if (sessionIsLive) preResolvedSession = oracle;
       oracle = preResolvedFleetSession.oracle;
