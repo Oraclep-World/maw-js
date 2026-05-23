@@ -5,6 +5,7 @@ import { cmdBind } from "./bind";
 import { cmdAccess } from "./access";
 import { cmdGuilds, cmdChannels, cmdMembers, cmdInventory } from "./inventory";
 import { startServer } from "./server";
+import { cmdVoiceFleet } from "./voice-cli";
 import { readFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -34,6 +35,7 @@ function printVersion(log: (s: string) => void): void {
   log("  ✓ access <bot> ...         v0.4 (list/show/map/add/rm/set/allow/lockdown)");
   log("  ✓ guilds/channels/members/inventory <bot>  v0.4.2 (Discord-state visibility)");
   log("  ✓ server [--port N]        v0.5 (voice bot registry + slash command gateway)");
+  log("  ✓ wake/sleep <bot|--all>   v0.6 (voice bot v2 process control)");
   log("  ⏸ pair <oracle> <chan>     v0.5 planned");
   log("  ⏸ route <from> <to>        v0.5 planned");
   log("  ⏸ serve (after_send hook)  v0.5 planned (replaces daemon — engine.serve)");
@@ -54,6 +56,9 @@ function printUsage(log: (s: string) => void): void {
   log("                                     channel + allowlist management per bot (NEW v0.4)");
   log("  server [--port N] [--no-discord] [--no-register]");
   log("                                     start maw discord server for voice bot v2");
+  log("  wake <bot|--all> [--server URL] [--voice-profile name]");
+  log("                                     start voice-bot v2 process(es)");
+  log("  sleep <bot|--all> [--server URL]  stop voice-bot v2 process(es)");
   log("");
   log("subcommands (planned):");
   log("  pair <oracle> <channel>            access.json + channel-map.json bootstrap (v0.5)");
@@ -141,6 +146,16 @@ export default async function handler(ctx: InvokeContext): Promise<InvokeResult>
         opts.port ??
         (Number(process.env.MAW_DISCORD_SERVER_PORT ?? process.env.VOICE_SERVER_PORT) || 7799);
       log(`maw discord server listening on port ${port}`);
+      return { ok: true, output: logs.join("\n") };
+    }
+
+    if (sub === "wake") {
+      await cmdVoiceFleet.wake(log, args.slice(1));
+      return { ok: true, output: logs.join("\n") };
+    }
+
+    if (sub === "sleep") {
+      await cmdVoiceFleet.sleep(log, args.slice(1));
       return { ok: true, output: logs.join("\n") };
     }
 

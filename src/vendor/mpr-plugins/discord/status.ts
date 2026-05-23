@@ -21,6 +21,7 @@ import {
 import { readdirSync, statSync } from "fs";
 import { join } from "path";
 import { hostname } from "os";
+import { fetchServerBots } from "./voice-cli";
 
 interface BotRow {
   bot: string;
@@ -132,6 +133,7 @@ interface StatusOpts {
   redact: boolean;
   json: boolean;
   filter?: string;
+  serverUrl: string;
 }
 
 function parseOpts(args: string[]): StatusOpts {
@@ -139,8 +141,11 @@ function parseOpts(args: string[]): StatusOpts {
     check: args.includes("--check"),
     redact: args.includes("--redact"),
     json: args.includes("--json"),
+    serverUrl: process.env.MAW_DISCORD_SERVER_URL ?? "http://localhost:7799",
   };
-  const positional = args.filter(a => !a.startsWith("--"));
+  const serverIdx = args.indexOf("--server");
+  if (serverIdx !== -1 && args[serverIdx + 1]) opts.serverUrl = args[serverIdx + 1]!;
+  const positional = args.filter((a, i) => !a.startsWith("--") && args[i - 1] !== "--server");
   if (positional[0]) opts.filter = positional[0];
   return opts;
 }
@@ -162,15 +167,43 @@ export const cmdStatus = {
       await addDiscordChecks(rows);
     }
 
+    let serverBots = await fetchServerBots(opts.serverUrl);
+    if (opts.filter) {
+      serverBots = serverBots.filter((bot) => bot.botName === opts.filter);
+    }
+
     if (opts.json) {
-      return this.emitJson(log, rows, opts);
+      return this.emitJson(log, rows, opts, serverBots);
     }
 
     if (opts.filter && rows.length === 1) {
+      this.emitServerRegistry(log, serverBots, opts);
       return this.emitDetailed(log, rows[0]!, opts);
     }
 
+    this.emitServerRegistry(log, serverBots, opts);
     return this.emitTable(log, rows, opts);
+  },
+
+  emitServerRegistry(log: (s: string) => void, serverBots: any[], opts: StatusOpts): void {
+    log(`voice server registry (${opts.serverUrl}):`);
+    if (serverBots.length === 0) {
+      log("  no registered voice-bot v2 processes");
+      log("");
+      return;
+    }
+    for (const bot of serverBots) {
+      const channel = bot.currentChannel?.name
+        ? ` #${bot.currentChannel.name}`
+        : bot.currentChannel?.id
+          ? ` ${bot.currentChannel.id}`
+          : "";
+      const follow = bot.followTarget?.targetUserId
+        ? ` follow=${bot.followTarget.targetUserId}`
+        : "";
+      log(`  ${bot.botName.padEnd(24)} ${bot.status}${channel}${follow}`);
+    }
+    log("");
   },
 
   emitTable(log: (s: string) => void, rows: BotRow[], opts: StatusOpts): void {
@@ -286,10 +319,14 @@ export const cmdStatus = {
     }
   },
 
-  emitJson(log: (s: string) => void, rows: BotRow[], _opts: StatusOpts): void {
+  emitJson(log: (s: string) => void, rows: BotRow[], opts: StatusOpts, serverBots: any[] = []): void {
     const host = hostname().split(".")[0];
     const out = {
       host,
+      voice_server: {
+        url: opts.serverUrl,
+        bots: serverBots,
+      },
       bots: rows.map(r => {
         const cls = classifyBot(r);
         return {
