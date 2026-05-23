@@ -87,26 +87,25 @@ export async function sendCommand(
 export async function handleSlashCommand(
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const command = buildCommandFromInteraction(interaction);
 
   if (interaction.commandName === "bot-status") {
-    await replyStatus(interaction, command.botName);
+    await editStatusReply(interaction, command.botName);
     return;
   }
 
   if (!command.botName) {
-    await interaction.reply({
+    await interaction.editReply({
       content: "bot is required",
-      flags: MessageFlags.Ephemeral,
     });
     return;
   }
 
   if (command.command.action === "follow") {
     if (!command.command.targetUserId || !command.command.guildId) {
-      await interaction.reply({
+      await interaction.editReply({
         content: "follow requires a guild and user",
-        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -128,11 +127,10 @@ export async function handleSlashCommand(
     await joinTargetCurrentChannel(command.botName, command.command.targetUserId, interaction.guild);
   }
   const label = result.ok ? "sent" : "failed";
-  await interaction.reply({
+  await interaction.editReply({
     content: result.ok
       ? `/${interaction.commandName} ${label} to ${command.botName}`
       : `/${interaction.commandName} ${label}: ${result.error}`,
-    flags: MessageFlags.Ephemeral,
   });
 }
 
@@ -193,20 +191,19 @@ function buildCommandFromInteraction(interaction: ChatInputCommandInteraction): 
   }
 }
 
-async function replyStatus(
+async function editStatusReply(
   interaction: ChatInputCommandInteraction,
   botName?: string,
 ): Promise<void> {
   const bots = botName ? [getBot(botName)].filter(Boolean) : getAllBots(interaction.guildId ?? undefined);
   if (bots.length === 0) {
-    await interaction.reply({
+    await interaction.editReply({
       content: botName ? `bot '${botName}' is not registered` : "no bots registered",
-      flags: MessageFlags.Ephemeral,
     });
     return;
   }
 
-  await interaction.reply({
+  await interaction.editReply({
     content: bots
       .map((bot) => {
         const channel = bot!.currentChannel?.name
@@ -218,6 +215,5 @@ async function replyStatus(
         return `${bot!.botName}: ${bot!.status}${channel}${followTarget}`;
       })
       .join("\n"),
-    flags: MessageFlags.Ephemeral,
   });
 }
