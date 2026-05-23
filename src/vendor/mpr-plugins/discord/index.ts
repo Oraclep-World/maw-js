@@ -6,6 +6,7 @@ import { cmdAccess } from "./access";
 import { cmdGuilds, cmdChannels, cmdMembers, cmdInventory } from "./inventory";
 import { startServer } from "./server";
 import { cmdVoiceFleet } from "./voice-cli";
+import { decryptToken, listPassTokens } from "./lib";
 import { readFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -54,7 +55,7 @@ function printUsage(log: (s: string) => void): void {
   log("                                     end-to-end Discord-online for a bot on this host");
   log("  access <bot> <list|show|map|add|rm|set|allow|lockdown> [...]");
   log("                                     channel + allowlist management per bot (NEW v0.4)");
-  log("  server [--port N] [--no-discord] [--no-register]");
+  log("  server [--port N] [--token bot] [--no-discord] [--no-register]");
   log("                                     start maw discord server for voice bot v2");
   log("  wake <bot|--all> [--server URL] [--voice-profile name]");
   log("                                     start voice-bot v2 process(es)");
@@ -141,11 +142,23 @@ export default async function handler(ctx: InvokeContext): Promise<InvokeResult>
 
     if (sub === "server") {
       const opts = parseServerArgs(args.slice(1));
-      startServer(opts);
+      const token = await resolveServerToken(opts.tokenName);
+      const applicationId =
+        process.env.MAW_DISCORD_APPLICATION_ID ??
+        process.env.DISCORD_APPLICATION_ID ??
+        process.env.DISCORD_CLIENT_ID;
+      startServer({
+        ...opts,
+        token,
+        applicationId,
+        startDiscord: opts.startDiscord ?? Boolean(token),
+      });
       const port =
         opts.port ??
         (Number(process.env.MAW_DISCORD_SERVER_PORT ?? process.env.VOICE_SERVER_PORT) || 7799);
       log(`maw discord server listening on port ${port}`);
+      // Keep process alive — server must stay running
+      await new Promise(() => {});
       return { ok: true, output: logs.join("\n") };
     }
 
@@ -177,16 +190,20 @@ function parseServerArgs(args: string[]): {
   port?: number;
   startDiscord?: boolean;
   registerCommands?: boolean;
+  tokenName?: string;
 } {
   const opts: {
     port?: number;
     startDiscord?: boolean;
     registerCommands?: boolean;
+    tokenName?: string;
   } = {};
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
     if (arg === "--port" || arg === "-p") {
       opts.port = Number(args[++i]);
+    } else if (arg === "--token") {
+      opts.tokenName = args[++i];
     } else if (arg === "--no-discord") {
       opts.startDiscord = false;
     } else if (arg === "--no-register") {
@@ -194,4 +211,25 @@ function parseServerArgs(args: string[]): {
     }
   }
   return opts;
+}
+
+async function resolveServerToken(tokenName?: string): Promise<string | undefined> {
+  const envToken = process.env.MAW_DISCORD_TOKEN ?? process.env.DISCORD_TOKEN;
+  if (envToken) return envToken;
+
+  const tokens = listPassTokens();
+  const candidates = tokenName
+    ? tokens.filter((token) =>
+        token.bot === tokenName ||
+        token.name === tokenName ||
+        token.name === `${tokenName}-token`
+      )
+    : tokens;
+
+  for (const entry of candidates) {
+    const token = await decryptToken(entry.name);
+    if (token) return token;
+  }
+
+  return undefined;
 }
