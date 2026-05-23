@@ -4,6 +4,7 @@ import { cmdStatus } from "./status";
 import { cmdBind } from "./bind";
 import { cmdAccess } from "./access";
 import { cmdGuilds, cmdChannels, cmdMembers, cmdInventory } from "./inventory";
+import { startServer } from "./server";
 import { readFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -32,6 +33,7 @@ function printVersion(log: (s: string) => void): void {
   log("  ✓ bind <bot>               v0.3 (rewrite to use 'maw wake' pending)");
   log("  ✓ access <bot> ...         v0.4 (list/show/map/add/rm/set/allow/lockdown)");
   log("  ✓ guilds/channels/members/inventory <bot>  v0.4.2 (Discord-state visibility)");
+  log("  ✓ server [--port N]        v0.5 (voice bot registry + slash command gateway)");
   log("  ⏸ pair <oracle> <chan>     v0.5 planned");
   log("  ⏸ route <from> <to>        v0.5 planned");
   log("  ⏸ serve (after_send hook)  v0.5 planned (replaces daemon — engine.serve)");
@@ -50,6 +52,8 @@ function printUsage(log: (s: string) => void): void {
   log("                                     end-to-end Discord-online for a bot on this host");
   log("  access <bot> <list|show|map|add|rm|set|allow|lockdown> [...]");
   log("                                     channel + allowlist management per bot (NEW v0.4)");
+  log("  server [--port N] [--no-discord] [--no-register]");
+  log("                                     start maw discord server for voice bot v2");
   log("");
   log("subcommands (planned):");
   log("  pair <oracle> <channel>            access.json + channel-map.json bootstrap (v0.5)");
@@ -130,6 +134,16 @@ export default async function handler(ctx: InvokeContext): Promise<InvokeResult>
       return { ok: true, output: logs.join("\n") };
     }
 
+    if (sub === "server") {
+      const opts = parseServerArgs(args.slice(1));
+      startServer(opts);
+      const port =
+        opts.port ??
+        (Number(process.env.MAW_DISCORD_SERVER_PORT ?? process.env.VOICE_SERVER_PORT) || 7799);
+      log(`maw discord server listening on port ${port}`);
+      return { ok: true, output: logs.join("\n") };
+    }
+
     if (sub === "pair" || sub === "route" || sub === "serve") {
       log(`✗ '${sub}' not implemented yet (v0.4 ships tokens + status + bind + access).`);
       log("planned for v0.5 — see 'maw discord' for full subcommand list.");
@@ -142,4 +156,27 @@ export default async function handler(ctx: InvokeContext): Promise<InvokeResult>
   } catch (e: any) {
     return { ok: false, error: e?.message || String(e), output: logs.join("\n") };
   }
+}
+
+function parseServerArgs(args: string[]): {
+  port?: number;
+  startDiscord?: boolean;
+  registerCommands?: boolean;
+} {
+  const opts: {
+    port?: number;
+    startDiscord?: boolean;
+    registerCommands?: boolean;
+  } = {};
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
+    if (arg === "--port" || arg === "-p") {
+      opts.port = Number(args[++i]);
+    } else if (arg === "--no-discord") {
+      opts.startDiscord = false;
+    } else if (arg === "--no-register") {
+      opts.registerCommands = false;
+    }
+  }
+  return opts;
 }
