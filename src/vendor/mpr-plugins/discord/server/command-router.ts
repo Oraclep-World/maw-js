@@ -1,5 +1,5 @@
 import { MessageFlags, type ChatInputCommandInteraction } from "discord.js";
-import { follow, unfollow } from "./follow-manager";
+import { follow, joinTargetCurrentChannel, unfollow } from "./follow-manager";
 import { getAllBots, getBot } from "./registry";
 
 export type BotCommandAction =
@@ -110,12 +110,23 @@ export async function handleSlashCommand(
       });
       return;
     }
-    follow(command.botName, command.command.targetUserId, command.command.guildId);
+    follow(command.botName, command.command.targetUserId, command.command.guildId, {
+      guild: interaction.guild ?? undefined,
+      syncNow: false,
+    });
   } else if (command.command.action === "unfollow") {
     unfollow(command.botName);
   }
 
   const result = await sendCommand(command.botName, command.command);
+  if (
+    result.ok &&
+    command.command.action === "follow" &&
+    command.command.targetUserId &&
+    interaction.guild
+  ) {
+    await joinTargetCurrentChannel(command.botName, command.command.targetUserId, interaction.guild);
+  }
   const label = result.ok ? "sent" : "failed";
   await interaction.reply({
     content: result.ok

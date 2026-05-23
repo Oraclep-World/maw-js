@@ -1,4 +1,4 @@
-import type { VoiceState } from "discord.js";
+import type { Guild, VoiceState } from "discord.js";
 import { getBot } from "./registry";
 
 export interface FollowState {
@@ -19,9 +19,15 @@ export function follow(
   botName: string,
   targetUserId: string,
   guildId: string,
+  options: { guild?: Guild; syncNow?: boolean } = {},
 ): FollowState {
   const state = { targetUserId, guildId };
   follows.set(botName, state);
+  if (options.guild && options.syncNow !== false) {
+    joinTargetCurrentChannel(botName, targetUserId, options.guild).catch((error) => {
+      console.warn(`[maw-discord-server] immediate follow join failed: ${error?.message ?? error}`);
+    });
+  }
   return state;
 }
 
@@ -66,6 +72,24 @@ export function handleVoiceStateUpdate(
   }));
 }
 
+export async function joinTargetCurrentChannel(
+  botName: string,
+  targetUserId: string,
+  guild: Guild,
+): Promise<FollowMoveCommand | null> {
+  const channelId = await getMemberVoiceChannelId(guild, targetUserId);
+  if (!channelId || botIsAlreadyInChannel(botName, guild.id, channelId)) return null;
+
+  const command: FollowMoveCommand = {
+    botName,
+    action: "join",
+    guildId: guild.id,
+    channelId,
+  };
+  await postFollowCommand(command);
+  return command;
+}
+
 export async function handleDiscordVoiceStateUpdate(
   oldState: VoiceState,
   newState: VoiceState,
@@ -98,4 +122,26 @@ async function postFollowCommand(command: FollowMoveCommand): Promise<void> {
       channelId: command.channelId,
     }),
   });
+}
+
+async function getMemberVoiceChannelId(
+  guild: Guild,
+  userId: string,
+): Promise<string | null> {
+  const cached = guild.voiceStates.cache.get(userId)?.channelId;
+  if (cached) return cached;
+
+  const member = await guild.members.fetch(userId).catch(() => null);
+  return member?.voice.channelId ?? null;
+}
+
+function botIsAlreadyInChannel(
+  botName: string,
+  guildId: string,
+  channelId: string,
+): boolean {
+  const bot = getBot(botName);
+  if (!bot?.currentChannel) return false;
+  return bot.currentChannel.id === channelId &&
+    (!bot.currentChannel.guildId || bot.currentChannel.guildId === guildId);
 }
