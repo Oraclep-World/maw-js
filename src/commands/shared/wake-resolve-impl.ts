@@ -426,6 +426,14 @@ export function resolveFleetSession(oracle: string): string | null {
   return null;
 }
 
+function knownFleetSessionStems(): string[] {
+  try {
+    return loadFleet().map(session => session.name);
+  } catch {
+    return [];
+  }
+}
+
 export async function detectSession(oracle: string, urlRepoName?: string): Promise<string | null> {
   const sessions = await tmux.listSessions();
   const mapped = getSessionMap()[oracle];
@@ -502,7 +510,9 @@ export async function detectSession(oracle: string, urlRepoName?: string): Promi
   // canonical fleet stem misses and wake tries to create a duplicate session.
   // Accept only prefixes that continue inside the same word, not at a dash
   // boundary, and fail loudly when more than one live fleet stem matches.
-  const numericPrefix = resolveNumericFleetStemPrefix(oracle, numericSessions);
+  const numericPrefix = resolveNumericFleetStemPrefix(oracle, numericSessions, {
+    knownFullStems: knownFleetSessionStems(),
+  });
   if (numericPrefix.kind === "fuzzy") return numericPrefix.match.name;
   if (numericPrefix.kind === "ambiguous") {
     console.error(`\x1b[31merror\x1b[0m: '${oracle}' is ambiguous — matches ${numericPrefix.candidates.length} fleet sessions:`);
