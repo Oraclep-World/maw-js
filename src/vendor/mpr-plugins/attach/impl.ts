@@ -80,7 +80,7 @@ export async function cmdAttach(name: string, opts: AttachOpts = {}): Promise<vo
       return;
     }
     console.log(`  \x1b[36m·\x1b[0m '${name}' not local or federated — delegating to wake`);
-    await spawnMaw(["wake", name]);
+    await spawnMaw(["wake", name], { MAW_ATTACH_FOLLOWS: "1" });
     // Wake created the session. Re-resolve — should hit Tier 1 now.
     //
     // #1342 — wake fuzzy-resolves the original input (e.g. "wind" →
@@ -164,7 +164,7 @@ export async function cmdAttach(name: string, opts: AttachOpts = {}): Promise<vo
     }
 
     console.log(`  \x1b[36m⚡\x1b[0m waking ${result.fleetName}...`);
-    await spawnMaw(["wake", result.fleetName]);
+    await spawnMaw(["wake", result.fleetName], { MAW_ATTACH_FOLLOWS: "1" });
     if (opts.shell) {
       await openShellForSession(name, result.fleetName, opts, deps.loadFleet());
       return;
@@ -270,15 +270,18 @@ async function executeRemoteAttach(target: Extract<ResolveResult, { tier: 3 }>):
  * Invoke `maw` as a subprocess for wake paths that need the normal CLI
  * dispatch stack before this command can re-resolve and attach in-process.
  */
-async function spawnMaw(args: string[]): Promise<void> {
-  await spawnProc(["maw", ...args]);
+type SpawnEnv = Record<string, string>;
+
+async function spawnMaw(args: string[], extraEnv: SpawnEnv = {}): Promise<void> {
+  await spawnProc(["maw", ...args], extraEnv);
 }
 
-async function spawnProc(cmd: string[]): Promise<void> {
+async function spawnProc(cmd: string[], extraEnv: SpawnEnv = {}): Promise<void> {
   const proc = Bun.spawn(cmd, {
     stdin: "inherit",
     stdout: "inherit",
     stderr: "inherit",
+    env: { ...process.env, ...extraEnv },
   });
   const exitCode = await proc.exited;
   if (exitCode !== 0) {

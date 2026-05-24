@@ -164,6 +164,7 @@ describe("wake attach prompt gate — default coverage", () => {
 
   it("suppresses attach prompts in automated MAW_TEST_MODE runs", () => {
     expect(shouldOfferExistingSessionAttach({}, true, { MAW_TEST_MODE: "1" } as NodeJS.ProcessEnv)).toBe(false);
+    expect(shouldOfferExistingSessionAttach({}, true, { MAW_ATTACH_FOLLOWS: "1" } as NodeJS.ProcessEnv)).toBe(false);
   });
 });
 
