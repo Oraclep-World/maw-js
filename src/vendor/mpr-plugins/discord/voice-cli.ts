@@ -97,6 +97,10 @@ async function resolveVoiceBotRepo(): Promise<string> {
   );
 }
 
+async function resolveOracleRepo(bot: string): Promise<string | null> {
+  return findGhqPath(bot);
+}
+
 async function resolveToken(bot: string, tokenName?: string): Promise<string> {
   const tokens = listPassTokens();
   const entry = tokenName
@@ -143,6 +147,7 @@ async function wakeOne(
   }
 
   const repo = await resolveVoiceBotRepo();
+  const oracleRepo = await resolveOracleRepo(bot.bot);
   const token = await resolveToken(bot.bot, bot.tokenName);
   const proc = Bun.spawn(["bun", join(repo, "src", "index.ts")], {
     cwd: repo,
@@ -155,6 +160,7 @@ async function wakeOne(
       BOT_NAME: bot.bot,
       SERVER_URL: opts.serverUrl,
       MAW_DISCORD_SERVER_URL: opts.serverUrl,
+      ORACLE_REPO: oracleRepo || undefined,
       VOICE_PROFILE: opts.voiceProfile ?? bot.voiceProfile ?? "premwadee",
     },
   });
