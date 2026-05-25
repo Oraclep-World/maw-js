@@ -30,6 +30,7 @@ export default async function handler(ctx: InvokeContext): Promise<InvokeResult>
         "--org": String,
         "--repo": String,
         "--issue": Number,
+        "--issue-repo": String,
         "--note": String,
         "--nickname": String,
         "--fast": Boolean,
@@ -74,7 +75,7 @@ export default async function handler(ctx: InvokeContext): Promise<InvokeResult>
 
       const name = flags._[0];
       if (!name || name === "--help" || name === "-h") {
-        return { ok: false, error: "usage: maw bud <name> [--from <oracle>] [--root] [--seed] [--org <org>] [--repo org/repo] [--issue N] [--note <text>] [--nickname <pretty>] [--fast] [--split] [--scaffold-only] [--dry-run]\n       Or:    maw scaffold <name> [bud flags...]  (structure only; no commit/push/wake/awaken)\n       Or:    maw bud --from-repo <path|url> --stem <stem> [--pr] [--from <parent>] [--seed] [--sync-peers] [--force] [--track-vault] [--dry-run]  (#588)\n       Default: born blank. Use --seed to pre-load parent's ψ at birth.\n       Pull memory later: maw soul-sync <parent> --from" };
+        return { ok: false, error: "usage: maw bud <name> [--from <oracle>] [--root] [--seed] [--org <org>] [--repo org/repo] [--issue N] [--issue-repo owner/repo] [--note <text>] [--nickname <pretty>] [--fast] [--split] [--scaffold-only] [--dry-run]\n       Or:    maw scaffold <name> [bud flags...]  (structure only; no commit/push/wake/awaken)\n       Or:    maw bud --from-repo <path|url> --stem <stem> [--pr] [--from <parent>] [--seed] [--sync-peers] [--force] [--track-vault] [--dry-run]  (#588)\n       Default: born blank. Use --seed to pre-load parent's ψ at birth.\n       --issue N looks up in {org}/{new}-oracle by default; pair with --from to look in parent's repo, or use --issue-repo for explicit override.\n       Pull memory later: maw soul-sync <parent> --from" };
       }
       if (name.startsWith("-")) {
         return { ok: false, error: `"${name}" looks like a flag, not an oracle name.\n  usage: maw bud <name> ${args.join(" ")}` };
@@ -85,6 +86,7 @@ export default async function handler(ctx: InvokeContext): Promise<InvokeResult>
         repo: flags["--repo"],
         org: flags["--org"],
         issue: flags["--issue"],
+        issueRepo: flags["--issue-repo"],
         note: flags["--note"],
         nickname: flags["--nickname"],
         fast: flags["--fast"],
@@ -105,6 +107,7 @@ export default async function handler(ctx: InvokeContext): Promise<InvokeResult>
         repo: body.repo as string | undefined,
         org: body.org as string | undefined,
         issue: body.issue as number | undefined,
+        issueRepo: body.issueRepo as string | undefined,
         note: body.note as string | undefined,
         nickname: body.nickname as string | undefined,
         fast: body.fast as boolean | undefined,
