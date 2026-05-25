@@ -162,6 +162,14 @@ export interface MawConfig {
       keyPrefix?: string;
     };
   };
+  /**
+   * Legacy Scout LAN discovery toggle (#1903).
+   *
+   * `false` disables the UDP scout transport without changing Zenoh scout or
+   * explicit federation peers. Also reachable per-process via
+   * `MAW_NO_SCOUT=1` / `maw serve --no-scout`.
+   */
+  scout?: boolean;
   /** Discovery provider selection for peer presence candidates. */
   discovery?: {
     transport?: "scout" | "zenoh" | "both" | "off";
