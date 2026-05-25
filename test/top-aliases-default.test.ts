@@ -53,7 +53,6 @@ describe("top alias resolution table", () => {
       [["t", "send"], ["team", "send"]],
       [["zoom", "42"], ["tmux", "zoom", "42"]],
       [["panes"], ["tmux", "ls", "--all", "--verbose"]],
-      [["cleanup"], ["team", "cleanup", "--zombie-agents"]],
       [["tile", "4"], ["tile", "4"]],
       [["scaffold", "neo"], ["bud", "--scaffold-only", "neo"]],
       [["snapshots", "list"], ["fleet", "snapshots", "list"]],
@@ -62,7 +61,10 @@ describe("top alias resolution table", () => {
     for (const [input, expected] of cases) {
       expect(resolveTopAlias(input)).toEqual({ kind: "argv", argv: expected });
     }
-    expect(ALIAS_DESCRIPTIONS.cleanup).toContain("zombie");
+    // #1902 — cleanup alias deleted; bare 'maw cleanup' resolves via the
+    // cleanup plugin in the registry, not via top-aliases.
+    expect(resolveTopAlias(["cleanup"])).toBeNull();
+    expect(ALIAS_DESCRIPTIONS.cleanup).toBeUndefined();
     expect(ALIAS_DESCRIPTIONS.layout).toContain("current window");
     expect(ALIAS_DESCRIPTIONS.bring).toContain("Bring");
   });

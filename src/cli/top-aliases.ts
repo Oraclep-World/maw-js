@@ -45,7 +45,6 @@ export const ALIAS_DESCRIPTIONS: Record<string, string> = {
   layout: "Apply tmux layout to the current window",
   zoom: "Toggle zoom on a pane",
   panes: "List all panes across sessions",
-  cleanup: "Kill zombie agent panes",
   tile: "Tile current window or spawn N panes tiled",
   bring: "Bring an oracle HERE — thin alias for `wake --split`",
   b: "Bring an oracle HERE (short form of `bring`)",
