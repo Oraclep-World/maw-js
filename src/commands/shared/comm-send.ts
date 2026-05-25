@@ -395,6 +395,85 @@ export interface CmdSendOptions {
   inboxOnly?: boolean;
   from?: string;
   receiverInbox?: ReceiverInboxWriter | false;
+  /**
+   * #1907 — opt out of post-send verify-submit retry. Default behaviour
+   * (when this is undefined or false) is to peek the target pane after
+   * send-keys, detect when the implicit Enter was eaten by Claude TUI
+   * scroll-mode / popup, and send an explicit C-m. Set true for tight
+   * loops where the +800ms verify cost is unacceptable.
+   */
+  noVerifySubmit?: boolean;
+}
+
+/** @internal — exported for test injection only. */
+export interface VerifySubmitOpts {
+  delayMs?: number;
+  maxRetries?: number;
+  captureFn?: (target: string, lines: number, host?: string) => Promise<string>;
+  sendKeysFn?: (target: string, text: string, host?: string) => Promise<void>;
+  sleepFn?: (ms: number) => Promise<void>;
+  host?: string;
+}
+
+export interface VerifySubmitResult {
+  delivered: boolean;
+  retriesNeeded: number;
+  warning?: string;
+}
+
+/**
+ * #1907 — verify that the implicit Enter from `tmux send-keys` actually
+ * submitted, by peeking the target pane and re-sending Enter if the message
+ * text still sits in the input area. Up to 2 Enter retries before giving up.
+ *
+ * Heuristic: capture last 10 lines, search the last 3 for the first 80 chars
+ * of the message. The input line is the bottommost; chat history scrolls up
+ * and out of the 3-line tail under normal Claude TUI rendering. False-positive
+ * cost is a benign extra Enter (no-op in most TUIs).
+ */
+export async function verifySubmitDelivered(
+  target: string,
+  message: string,
+  opts: VerifySubmitOpts = {},
+): Promise<VerifySubmitResult> {
+  const envDelay = parseInt(process.env.MAW_HEY_VERIFY_DELAY_MS ?? "", 10);
+  const delayMs = opts.delayMs ?? (Number.isFinite(envDelay) && envDelay > 0 ? envDelay : 800);
+  const maxRetries = opts.maxRetries ?? 2;
+  const captureFn = opts.captureFn ?? capture;
+  const sendKeysFn = opts.sendKeysFn ?? sendKeys;
+  const sleepFn = opts.sleepFn ?? ((ms: number) => Bun.sleep(ms));
+  const host = opts.host;
+
+  const needle = message.slice(0, 80).trim();
+  if (!needle) return { delivered: true, retriesNeeded: 0 };
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    await sleepFn(delayMs);
+    let content: string;
+    try {
+      content = await captureFn(target, 10, host);
+    } catch (e: unknown) {
+      const reason = e instanceof Error ? e.message : String(e);
+      return { delivered: false, retriesNeeded: attempt,
+        warning: `submit unverified — capture-pane failed: ${reason}` };
+    }
+    const tail = content.split("\n").slice(-3).join("\n");
+    if (!tail.includes(needle)) {
+      return { delivered: true, retriesNeeded: attempt };
+    }
+    if (attempt < maxRetries) {
+      try {
+        // "\r" → Enter via ssh.ts SPECIAL_KEYS map; goes through exitModeIfNeeded.
+        await sendKeysFn(target, "\r", host);
+      } catch (e: unknown) {
+        const reason = e instanceof Error ? e.message : String(e);
+        return { delivered: false, retriesNeeded: attempt + 1,
+          warning: `submit unverified — Enter retry failed: ${reason}` };
+      }
+    }
+  }
+  return { delivered: false, retriesNeeded: maxRetries,
+    warning: `submit unverified after ${maxRetries} Enter retries` };
 }
 
 export async function cmdSend(
@@ -731,6 +810,16 @@ export async function cmdSend(
       process.exit(1);
     }
     await sendKeys(target, outboundMessage);
+    // #1907 — verify the implicit Enter actually submitted. Default-on;
+    // opt out per-call with --no-verify-submit.
+    if (!opts.noVerifySubmit) {
+      const verify = await verifySubmitDelivered(target, outboundMessage);
+      if (verify.warning) {
+        console.log(`  \x1b[33m⚠\x1b[0m ${verify.warning}`);
+      } else if (verify.retriesNeeded > 0) {
+        console.log(`  \x1b[33m⚠\x1b[0m submit needed ${verify.retriesNeeded} Enter retry — TUI may have been in scroll-mode`);
+      }
+    }
     await writeReceiverInbox(target);
     await runHook("after_send", { to: query, message: outboundMessage });
     if (!config.node) throw new Error("config.node is required — set 'node' in maw.config.json");

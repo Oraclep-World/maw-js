@@ -2,10 +2,11 @@ import { cmdPeek, cmdSend } from "../commands/shared/comm";
 import { UserError } from "../core/util/user-error";
 
 function printCommUsage(cmd: "hey" | "send", write: (line: string) => void = console.log): void {
-  write(`usage: maw ${cmd} [--from <node:oracle>] <target> <message> [--inbox] [--force deprecated] [--approve] [--trust]`);
+  write(`usage: maw ${cmd} [--from <node:oracle>] <target> <message> [--inbox] [--force deprecated] [--approve] [--trust] [--no-verify-submit]`);
   write("  default: write receiver inbox and inject into the target pane");
   write("  --from <node:oracle>: explicit sender for SSH relays; env fallback: MAW_SENDER");
   write("  --inbox: write receiver inbox only; skip pane injection");
+  write("  --no-verify-submit: skip the post-send Enter-retry probe (#1907). Saves ~800ms per call; only set for tight loops.");
   write("  --force: deprecated compatibility alias; delivery is already forced by default");
   write("  target forms:");
   write("    <oracle-window>              same-node window name (local-only)");
@@ -47,6 +48,7 @@ export async function routeComm(cmd: string, args: string[]): Promise<boolean> {
     // entry so the same pair stops queuing on subsequent sends.
     let approve = false;
     let trust = false;
+    let noVerifySubmit = false;
     let from: string | undefined;
     let target: string | undefined;
     const msgArgs: string[] = [];
@@ -57,6 +59,7 @@ export async function routeComm(cmd: string, args: string[]): Promise<boolean> {
       if (arg === "--inbox") { inboxOnly = true; continue; }
       if (arg === "--approve") { approve = true; continue; }
       if (arg === "--trust") { trust = true; continue; }
+      if (arg === "--no-verify-submit") { noVerifySubmit = true; continue; }
       if (arg === "--from") {
         if (!rest[i + 1] || rest[i + 1].startsWith("--")) {
           console.error("✗ missing value for --from");
@@ -99,7 +102,7 @@ export async function routeComm(cmd: string, args: string[]): Promise<boolean> {
     if (force) {
       console.error("\x1b[90mnote: --force is deprecated; maw hey delivers by default. Use --inbox to queue without pane injection.\x1b[0m");
     }
-    await cmdSend(target, msgArgs.join(" "), force, { approve, trust, inboxOnly, ...(from ? { from } : {}) });
+    await cmdSend(target, msgArgs.join(" "), force, { approve, trust, inboxOnly, noVerifySubmit, ...(from ? { from } : {}) });
     return true;
   }
   return false;
