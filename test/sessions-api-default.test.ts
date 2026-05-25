@@ -662,3 +662,83 @@ describe("pane keys, probe, select, wake, and sleep routes", () => {
     expect((await readJson(res)).error).toContain("sleep boom");
   });
 });
+
+describe("/api/capture resolver + error enrichment (#1908)", () => {
+  test("resolveCapture: :active sentinel strips to bare-name path", () => {
+    const sessions = [session("100-pulse", [{ index: 0, name: "pulse", active: true }])];
+    const stubDeps: SessionsApiDeps = {
+      loadConfig: (() => ({ sessions: {} } as any)),
+      resolveFleetSession: () => null,
+      findWindow: ((s: any[], q: string) => {
+        const match = s.find((x: any) => x.name === q.split(":")[0]);
+        return match ? `${match.name}:${match.windows[0].index}` : null;
+      }) as any,
+    };
+    expect(resolveCapture("100-pulse:active", sessions as any, stubDeps)).toBe("100-pulse:0");
+  });
+
+  test("resolveCapture: :* sentinel also strips", () => {
+    const sessions = [session("100-pulse", [{ index: 0, name: "pulse", active: true }])];
+    const stubDeps: SessionsApiDeps = {
+      loadConfig: (() => ({ sessions: {} } as any)),
+      resolveFleetSession: () => null,
+      findWindow: ((s: any[], q: string) => {
+        const match = s.find((x: any) => x.name === q.split(":")[0]);
+        return match ? `${match.name}:${match.windows[0].index}` : null;
+      }) as any,
+    };
+    expect(resolveCapture("100-pulse:*", sessions as any, stubDeps)).toBe("100-pulse:0");
+  });
+
+  test("resolveCapture: explicit :1 stays as :1 (legacy passthrough)", () => {
+    const sessions = [session("100-pulse", [{ index: 0, name: "pulse", active: true }])];
+    const stubDeps: SessionsApiDeps = {
+      loadConfig: (() => ({ sessions: {} } as any)),
+      resolveFleetSession: () => null,
+      findWindow: ((_: any[], q: string) => q) as any,
+    };
+    expect(resolveCapture("100-pulse:1", sessions as any, stubDeps)).toBe("100-pulse:1");
+  });
+
+  test("/api/capture window-not-found error includes validWindows + hint", async () => {
+    const h = makeHarness({
+      capture: async () => { throw new Error("[local:local] can't find window: 1"); },
+    });
+    h.setSessions([session("100-pulse", [{ index: 0, name: "pulse", active: true }])]);
+
+    const resp = await h.app.handle(new Request("http://local/capture?target=100-pulse:1"));
+    const body = await readJson(resp);
+
+    expect(body.error).toBe("window not found");
+    expect(body.target).toBe("100-pulse:1");
+    expect(body.validWindows).toEqual([0]);
+    expect(body.hint).toContain("base-index appears to be 0");
+    expect(body.content).toBe("");
+  });
+
+  test("/api/capture :active sentinel returns content (no error)", async () => {
+    const h = makeHarness();
+    h.setSessions([session("100-pulse", [{ index: 0, name: "pulse", active: true }])]);
+
+    const resp = await h.app.handle(new Request("http://local/capture?target=100-pulse:active"));
+    const body = await readJson(resp);
+
+    expect(body.error).toBeUndefined();
+    expect(body.content).toBe("line one\nlast line");
+  });
+
+  test("/api/capture preserves legacy error shape for non-window-not-found failures", async () => {
+    const h = makeHarness({
+      capture: async () => { throw new Error("tmux server died unexpectedly"); },
+    });
+    h.setSessions([session("100-pulse", [{ index: 0, name: "pulse", active: true }])]);
+
+    const resp = await h.app.handle(new Request("http://local/capture?target=100-pulse:1"));
+    const body = await readJson(resp);
+
+    expect(body.content).toBe("");
+    expect(body.error).toContain("tmux server died unexpectedly");
+    expect(body.validWindows).toBeUndefined();
+    expect(body.hint).toBeUndefined();
+  });
+});

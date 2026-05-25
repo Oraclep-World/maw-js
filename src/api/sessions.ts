@@ -162,6 +162,16 @@ function sessionsUnavailablePayload(error: unknown): { error: string; hint?: str
 /** Resolve oracle name → tmux target, same logic as local peek (#273). */
 export function resolveCapture(query: string, sessions: { name: string }[], deps: SessionsApiDeps = {}): string {
   const d = defaults(deps);
+  // #1908 — strip ":active" or ":*" sentinel so the resolver falls back to
+  // the bare-name auto-resolve path (which selects the session's active
+  // window regardless of tmux base-index). Recommended cross-peer format
+  // for federation clients that want "active window of session X".
+  if (query.endsWith(":active") || query.endsWith(":*")) {
+    const bare = query.replace(/:(active|\*)$/, "");
+    if (bare.length > 0) {
+      return resolveCapture(bare, sessions, deps);
+    }
+  }
   const config = d.loadConfig();
   const mapped = (config.sessions as Record<string, string>)?.[query];
   if (mapped) {
@@ -208,7 +218,33 @@ export function createSessionsApi(deps: SessionsApiDeps = {}) {
       const resolved = resolveCapture(target, sessions, d);
       return { content: await d.capture(resolved) };
     } catch (e: any) {
-      return { content: "", error: e.message };
+      // #1908 — when the failure is "can't find window: N", enrich the
+      // response with the session's actual window indices and a hint
+      // about base-index. Helps federation clients format cross-peer
+      // targets without inspecting per-peer tmux config. Kept 200 status
+      // for backward compat with clients that handle {content:"",error:...}.
+      const msg = String(e?.message ?? e);
+      const winMatch = msg.match(/can'?t find window: (\S+)/i);
+      if (winMatch && target.includes(":")) {
+        const sessionName = target.split(":")[0] || "";
+        try {
+          const sessions = await d.listSessions();
+          const session = sessions.find(s => s.name === sessionName);
+          const validWindows = (session as any)?.windows?.map((w: any) => w.index) ?? [];
+          return {
+            content: "",
+            error: "window not found",
+            target,
+            validWindows,
+            hint: validWindows.length > 0
+              ? `tmux base-index appears to be ${Math.min(...validWindows)} on this peer; use bare name '${sessionName}' or '${sessionName}:active' for cross-peer requests`
+              : "session has no windows",
+          };
+        } catch {
+          // Fall through to legacy shape if listSessions fails again.
+        }
+      }
+      return { content: "", error: msg };
     }
   }, {
     query: t.Object({
