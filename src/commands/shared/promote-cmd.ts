@@ -11,7 +11,10 @@
 import { tmux } from "../../sdk";
 import { UserError } from "../../core/util/user-error";
 import { parseFlags } from "../../cli/parse-args";
-import { chooseWakeSessionName, validateForeignSessionName } from "./wake-cmd";
+// wake-cmd.ts is dynamically imported in cmdPromote (not at module top) so
+// top-aliases.ts can statically import this file without dragging the full
+// wake/config dep chain into test mocks (top-aliases tests mock maw-js/config
+// without exporting cfgLimit/etc; static import would break their link step).
 
 interface ResolvedWindow {
   session: string;
@@ -151,6 +154,9 @@ export async function cmdPromote(argv: string[], deps: CmdPromoteDeps = {}): Pro
   }
 
   // 3. Destination session name (Q2 — match chooseWakeSessionName).
+  // Dynamic import so wake-cmd's transitive deps don't load via top-aliases.ts
+  // static import path (some test mocks don't export every config helper).
+  const { chooseWakeSessionName, validateForeignSessionName } = await import("./wake-cmd");
   let dstSession: string;
   if (flags["--as"]) {
     validateForeignSessionName(flags["--as"]);
