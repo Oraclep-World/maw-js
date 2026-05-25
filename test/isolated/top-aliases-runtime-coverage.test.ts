@@ -65,6 +65,21 @@ mock.module(import.meta.resolve("../../src/config"), () => ({
     loadConfigCalls += 1;
     return { commands: { codex: "codex", spark: "spark" } };
   },
+  // Stub the additional config helpers re-exported by src/config barrel —
+  // transitive imports from tmux-class.ts / pty.ts / etc. need these at
+  // module-link time even when the test doesn't directly invoke them.
+  cfgLimit: (_key: string, fallback: number = 0) => fallback,
+  cfgInterval: (_key: string, fallback: number = 0) => fallback,
+  cfgTimeout: (_key: string, fallback: number = 0) => fallback,
+  cfg: (_key: string, fallback: any = undefined) => fallback,
+  configForDisplay: () => ({}),
+  resetConfig: () => {},
+  saveConfig: () => {},
+  buildCommand: (name: string) => name,
+  buildCommandInDir: (name: string) => name,
+  getEnvVars: () => ({}),
+  validateConfigShape: () => ({ ok: true }),
+  D: {} as any,
 }));
 
 const {
