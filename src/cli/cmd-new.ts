@@ -252,7 +252,7 @@ export async function cmdNew(argv: string[]): Promise<void> {
     ? buildClaudeStartupCommand(commandNameHint, cwd)
     : normalizeStartupCommand(flags["--cmd"]);
   const autoNameCommand = flags["--claude"] ? "claude" : startupCommand;
-  const name = explicitName ?? autoWorkspaceSessionName(cwd, autoNameCommand, flags["--path"] !== undefined);
+  let name = explicitName ?? autoWorkspaceSessionName(cwd, autoNameCommand, flags["--path"] !== undefined);
   if (!name) {
     printUsage(console.error);
     throw new UserError("new: missing session name");
@@ -265,6 +265,32 @@ export async function cmdNew(argv: string[]): Promise<void> {
   const windowName = rawWindowName ?? "lead";
   validateWorkspaceWindowName(windowName);
   const tmuxCommand = shellAfterCommand(startupCommand);
+
+  // #1894 — when name was auto-derived AND it collides with an existing
+  // session whose launch context differs, auto-suffix (-2, -3, ...) to find
+  // a free slot instead of silently failing or surprising the caller with a
+  // foreign session reuse. Only applies when the user did NOT pass an
+  // explicit name — explicit names keep the fail-loud behaviour at line
+  // 326 below (intentional: explicit name means "this exact session").
+  if (!explicitName) {
+    const baseName = name;
+    for (let suffix = 1; suffix <= 99; suffix++) {
+      const candidate = suffix === 1 ? baseName : `${baseName}-${suffix}`;
+      if (!(await tmux.hasSession(candidate))) { name = candidate; break; }
+      const existingLaunch = await readWorkspaceLaunch(candidate);
+      const contextMatches = !!existingLaunch
+        && existingLaunch.cwd === cwd
+        && existingLaunch.command === (startupCommand ?? "")
+        && (rawWindowName === undefined || existingLaunch.window === windowName);
+      if (contextMatches) { name = candidate; break; }
+      if (suffix === 99) {
+        throw new UserError(`new: 99 collisions for '${baseName}-N' — pass explicit session name`);
+      }
+    }
+    if (name !== baseName && !(flags["--print"] || flags["--json"])) {
+      console.log(`  \x1b[33m⚠\x1b[0m '${baseName}' exists with different context; using '${name}'`);
+    }
+  }
 
   const machineReadable = !!(flags["--print"] || flags["--json"]);
   const split = !!flags["--split"];
