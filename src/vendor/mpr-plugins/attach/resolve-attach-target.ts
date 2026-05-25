@@ -248,10 +248,27 @@ function exactWindowName(session: SessionLike, target: string): string | undefin
   return session.windows.find(w => w.name.toLowerCase() === t)?.name;
 }
 
-function runningMatchFor(session: SessionLike, target: string, fuzzy: boolean): { session: SessionLike; windowName?: string } | null {
-  if (nameMatches(session.name, target, fuzzy)) return { session };
+function runningMatchFor(
+  session: SessionLike,
+  target: string,
+  fuzzy: boolean,
+  preferOracleWindow: boolean = false,
+): { session: SessionLike; windowName?: string } | null {
+  // #1911 — when preferOracleWindow is set, look up the oracle-named window
+  // in this session so callers can build a `session:window` attach target
+  // that doesn't depend on which tmux window happened to be last-active.
+  // Default (false) preserves the legacy behavior for non-attach callers
+  // (capture, follow) whose tests assert on the bare `{ tier:1, sessionName }` shape.
+  const oracleWindow = preferOracleWindow
+    ? session.windows.find(w => windowMatchesOracle(w.name, target))
+    : undefined;
+
+  if (nameMatches(session.name, target, fuzzy)) {
+    return oracleWindow ? { session, windowName: oracleWindow.name } : { session };
+  }
   const windowName = exactWindowName(session, target);
   if (windowName) return { session, windowName };
+  if (oracleWindow) return { session, windowName: oracleWindow.name };
   if (session.windows.some(w => windowMatchesOracle(w.name, target))) return { session };
   return null;
 }
@@ -344,7 +361,7 @@ async function remoteMatchFor(target: string, deps: ResolveDeps): Promise<Extrac
 export async function resolveAttachTarget(
   target: string,
   deps: ResolveDeps,
-  opts: { fuzzy?: boolean; federation?: boolean } = {},
+  opts: { fuzzy?: boolean; federation?: boolean; preferOracleWindow?: boolean } = {},
 ): Promise<ResolveResult> {
   const explicitPeerTarget = parseExplicitPeerAttachTarget(target);
   if (explicitPeerTarget && "error" in explicitPeerTarget) {
@@ -369,12 +386,13 @@ export async function resolveAttachTarget(
 
   target = normalizeAttachQuery(target);
   const fuzzy = Boolean(opts.fuzzy);
+  const preferOracleWindow = Boolean(opts.preferOracleWindow);
   const sessions = (await deps.listSessions())
     .filter(s => !isInfrastructureChannelSessionName(s.name, target));
 
   // Tier 1 — live tmux session/window matches.
   const runningMatches = sessions
-    .map(s => runningMatchFor(s, target, fuzzy))
+    .map(s => runningMatchFor(s, target, fuzzy, preferOracleWindow))
     .filter((s): s is { session: SessionLike; windowName?: string } => Boolean(s));
   if (runningMatches.length === 1) {
     const match = runningMatches[0];

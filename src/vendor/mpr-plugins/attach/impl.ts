@@ -66,7 +66,9 @@ export async function cmdAttach(name: string, opts: AttachOpts = {}): Promise<vo
   }
 
   const deps = { listSessions, loadFleet };
-  const result: ResolveResult = await resolveAttachTarget(name, deps, { federation: true });
+  // #1911 — opt into oracle-window preference so multi-window sessions land
+  // on the oracle's window deterministically instead of whichever was last-active.
+  const result: ResolveResult = await resolveAttachTarget(name, deps, { federation: true, preferOracleWindow: true });
 
   if (!result) {
     // Local Tier 1+2 missed. Delegate to wake — it runs the full chain:
@@ -91,14 +93,15 @@ export async function cmdAttach(name: string, opts: AttachOpts = {}): Promise<vo
     // substring comparator that matches wake's intent. Wake's success
     // implies a fuzzy match exists; if not, the same `still not running
     // after wake` error fires as before.
-    const retried = await resolveAttachTarget(name, deps, { fuzzy: true });
+    const retried = await resolveAttachTarget(name, deps, { fuzzy: true, preferOracleWindow: true });
     if (retried && retried.tier === 1) {
       if (opts.shell) {
         await openShellForSession(name, retried.sessionName, opts, deps.loadFleet());
         return;
       }
-      console.log(`  \x1b[32m→\x1b[0m attaching to ${retried.sessionName}`);
-      await attachToSession(retried.sessionName);
+      const retriedTarget = retried.windowName ? `${retried.sessionName}:${retried.windowName}` : retried.sessionName;
+      console.log(`  \x1b[32m→\x1b[0m attaching to ${retriedTarget}`);
+      await attachToSession(retriedTarget);
       return;
     }
     console.error(`\x1b[31m✗\x1b[0m '${name}' still not running after wake`);
@@ -140,12 +143,16 @@ export async function cmdAttach(name: string, opts: AttachOpts = {}): Promise<vo
       await openShellForSession(name, result.sessionName, opts, deps.loadFleet());
       return;
     }
+    // #1911 — build session:window target when the resolver populated windowName
+    // (opt-in via preferOracleWindow above). Bare sessionName falls through unchanged
+    // for sessions without an oracle-named window.
+    const tier1Target = result.windowName ? `${result.sessionName}:${result.windowName}` : result.sessionName;
     if (opts.dryRun) {
-      console.log(`  \x1b[36m·\x1b[0m [dry-run] Tier 1 (live) — would attach to ${result.sessionName}`);
+      console.log(`  \x1b[36m·\x1b[0m [dry-run] Tier 1 (live) — would attach to ${tier1Target}`);
       return;
     }
-    console.log(`  \x1b[32m→\x1b[0m attaching to ${result.sessionName}`);
-    await attachToSession(result.sessionName);
+    console.log(`  \x1b[32m→\x1b[0m attaching to ${tier1Target}`);
+    await attachToSession(tier1Target);
     return;
   }
 

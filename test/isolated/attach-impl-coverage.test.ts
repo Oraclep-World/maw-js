@@ -152,7 +152,9 @@ describe("attach impl command routing", () => {
     expect(resolveCalls).toEqual([
       {
         target: "ghost",
-        opts: { federation: true },
+        // #1911 — attach opts in to preferOracleWindow so multi-window sessions
+        // resolve to session:window instead of last-active.
+        opts: { federation: true, preferOracleWindow: true },
         depsUseMockedListSessions: true,
         depsUseMockedLoadFleet: true,
       },
@@ -167,8 +169,9 @@ describe("attach impl command routing", () => {
     expect(spawnCalls).toEqual([["maw", "wake", "wind"]]);
     expect(tmuxAttachCalls).toEqual(["01-Somwind"]);
     expect(resolveCalls.map((call) => ({ target: call.target, opts: call.opts }))).toEqual([
-      { target: "wind", opts: { federation: true } },
-      { target: "wind", opts: { fuzzy: true } },
+      // #1911 — both passes opt in to preferOracleWindow.
+      { target: "wind", opts: { federation: true, preferOracleWindow: true } },
+      { target: "wind", opts: { fuzzy: true, preferOracleWindow: true } },
     ]);
     expect(logs.join("\n")).toContain("'wind' not local or federated");
     expect(logs.join("\n")).toContain("attaching to 01-Somwind");
@@ -181,7 +184,7 @@ describe("attach impl command routing", () => {
 
     expect(spawnCalls).toEqual([["maw", "wake", "ghost"]]);
     expect(errors.join("\n")).toContain("'ghost' still not running after wake");
-    expect(resolveCalls[1].opts).toEqual({ fuzzy: true });
+    expect(resolveCalls[1].opts).toEqual({ fuzzy: true, preferOracleWindow: true });
   });
 
   test("prints ambiguity candidates and refuses side effects", async () => {
@@ -385,8 +388,9 @@ describe("attach impl command routing", () => {
     await cmdAttach("mawjs-oracle", { shell: true });
 
     expect(resolveCalls).toEqual([
-      expect.objectContaining({ target: "mawjs-oracle", opts: { federation: true } }),
-      expect.objectContaining({ target: "mawjs-oracle", opts: { fuzzy: true } }),
+      // #1911 — both passes opt in to preferOracleWindow.
+      expect.objectContaining({ target: "mawjs-oracle", opts: { federation: true, preferOracleWindow: true } }),
+      expect.objectContaining({ target: "mawjs-oracle", opts: { fuzzy: true, preferOracleWindow: true } }),
     ]);
     expect(spawnCalls).toEqual([
       ["maw", "wake", "mawjs-oracle"],
