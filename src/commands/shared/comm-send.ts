@@ -810,9 +810,11 @@ export async function cmdSend(
       process.exit(1);
     }
     await sendKeys(target, outboundMessage);
-    // #1907 — verify the implicit Enter actually submitted. Default-on;
-    // opt out per-call with --no-verify-submit.
-    if (!opts.noVerifySubmit) {
+    // #1907 — verify the implicit Enter actually submitted. Default-on
+    // for live use; opt out per-call with --no-verify-submit; auto-skip
+    // under MAW_TEST_MODE so existing cmdSend mock harnesses (which don't
+    // stub capture-pane) don't have to adopt the verify seam.
+    if (!opts.noVerifySubmit && process.env.MAW_TEST_MODE !== "1") {
       const verify = await verifySubmitDelivered(target, outboundMessage);
       if (verify.warning) {
         console.log(`  \x1b[33m⚠\x1b[0m ${verify.warning}`);
