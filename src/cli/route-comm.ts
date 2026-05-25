@@ -102,7 +102,7 @@ export async function routeComm(cmd: string, args: string[]): Promise<boolean> {
     if (force) {
       console.error("\x1b[90mnote: --force is deprecated; maw hey delivers by default. Use --inbox to queue without pane injection.\x1b[0m");
     }
-    await cmdSend(target, msgArgs.join(" "), force, { approve, trust, inboxOnly, noVerifySubmit, ...(from ? { from } : {}) });
+    await cmdSend(target, msgArgs.join(" "), force, { approve, trust, inboxOnly, ...(noVerifySubmit ? { noVerifySubmit } : {}), ...(from ? { from } : {}) });
     return true;
   }
   return false;
