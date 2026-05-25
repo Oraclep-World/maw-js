@@ -69,7 +69,6 @@ export const TOP_ALIASES: Record<string, string[] | DirectHandler> = {
   layout: { kind: "direct", handler: "cmdLayout" },
   zoom: ["tmux", "zoom"],
   panes: ["tmux", "ls", "--all", "--verbose"],
-  cleanup: ["team", "cleanup", "--zombie-agents"],
   tile: ["tile"],
   bring: { kind: "direct", handler: "../commands/shared/wake-cmd:cmdBring" },
   b: { kind: "direct", handler: "../commands/shared/wake-cmd:cmdBring" },
