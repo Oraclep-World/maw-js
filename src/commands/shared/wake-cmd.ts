@@ -406,7 +406,7 @@ async function restoreSnapshotWindows(
 }
 
 
-function validateForeignSessionName(name: string): void {
+export function validateForeignSessionName(name: string): void {
   if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$/.test(name)) {
     throw new Error(`invalid target session '${name}' — use letters, numbers, dot, underscore, or dash`);
   }
@@ -658,7 +658,7 @@ async function resolveWakeFleetSessionRepo(meta: WakeFleetSessionMetadata): Prom
   throw new Error(`fleet-pinned ${meta.repo} for session ${meta.session} — clone failed and not found locally`);
 }
 
-async function chooseWakeSessionName(oracle: string, urlRepoName?: string): Promise<string> {
+export async function chooseWakeSessionName(oracle: string, urlRepoName?: string): Promise<string> {
   const mappedOrFleet = getSessionMap()[oracle] || resolveFleetSession(oracle);
   const baseName = mappedOrFleet || canonicalSessionName(urlRepoName || oracle);
   if (/^\d+-/.test(baseName)) return baseName;

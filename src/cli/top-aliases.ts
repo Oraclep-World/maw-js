@@ -25,6 +25,7 @@ import { cmdWake } from "../commands/shared/wake-cmd";
 import { activeDurationArg, cmdTmuxLayout, cmdTmuxLs, parseActiveDurationSeconds } from "../commands/plugins/tmux/impl";
 import { cmdPreflight } from "../commands/shared/preflight";
 import { cmdNew } from "./cmd-new";
+import { cmdPromote } from "../commands/shared/promote-cmd";
 import { parseFlags } from "./parse-args";
 import { UserError } from "../core/util/user-error";
 import { parseBringToTarget } from "../commands/shared/bring-flags";
@@ -86,6 +87,7 @@ export const TOP_ALIASES: Record<string, string[] | DirectHandler> = {
   wake: { kind: "direct", handler: "../commands/shared/wake-cmd:cmdWake" },
   awake: { kind: "direct", handler: "../commands/shared/wake-cmd:cmdAwake" },
   new: { kind: "direct", handler: "./cmd-new:cmdNew" },
+  promote: { kind: "direct", handler: "../commands/shared/promote-cmd:cmdPromote" },
 
   preflight: { kind: "direct", handler: "../commands/shared/preflight:cmdPreflight" },
   snapshots: ["fleet", "snapshots"],
@@ -303,6 +305,7 @@ export interface TopAliasHandlerDeps {
   cmdWake?: (oracle: string, opts: Record<string, unknown>) => MaybePromise;
   cmdNew?: (argv: string[]) => MaybePromise;
   cmdPreflight?: (opts: { fix: boolean }) => MaybePromise;
+  cmdPromote?: (argv: string[]) => MaybePromise;
   loadConfig?: () => { commands?: Record<string, unknown> };
   log?: (line: string) => void;
   error?: (line: string) => void;
@@ -324,6 +327,7 @@ export async function invokeDirectHandler(
   const directCmdWake = deps.cmdWake ?? cmdWake;
   const directCmdNew = deps.cmdNew ?? cmdNew;
   const directCmdPreflight = deps.cmdPreflight ?? cmdPreflight;
+  const directCmdPromote = deps.cmdPromote ?? cmdPromote;
   const log = deps.log ?? console.log;
   const error = deps.error ?? console.error;
 
@@ -503,6 +507,11 @@ export async function invokeDirectHandler(
 
   if (exportName === "cmdNew") {
     await directCmdNew(argv);
+    return;
+  }
+
+  if (exportName === "cmdPromote") {
+    await directCmdPromote(argv);
     return;
   }
 
