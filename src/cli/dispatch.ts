@@ -97,7 +97,16 @@ async function dispatchPluginRegistry(cmd: string, args: string[]): Promise<void
       if (help) console.error(`\n  usage: ${help}`);
       throw new UserError(`unknown flag: ${flagValidation.flag}`);
     }
-    const result = await invokePlugin(dispatch.plugin, { source: "cli", args: remaining, matchedName: dispatch.matchedName });
+    // #1885 — parse declared flags into ctx.flags for opt-in consumption.
+    const declared = (dispatch.plugin.manifest.cli?.flags ?? {}) as Record<string, any>;
+    const { parsePluginFlags } = await import("./dispatch-flag-parse");
+    const parsedFlags = parsePluginFlags(declared, remaining);
+    const result = await invokePlugin(dispatch.plugin, {
+      source: "cli",
+      args: remaining,
+      matchedName: dispatch.matchedName,
+      ...(Object.keys(parsedFlags).length > 0 ? { flags: parsedFlags } : {}),
+    });
     if (result.ok && result.output) console.log(result.output);
     else if (!result.ok) { console.error(result.error); process.exit(result.exitCode ?? 1); }
     process.exit(0);
@@ -186,7 +195,16 @@ async function dispatchPluginRegistry(cmd: string, args: string[]): Promise<void
           if (help) console.error(`\n  usage: ${help}`);
           throw new UserError(`unknown flag: ${flagValidation.flag}`);
         }
-        const result = await invokePlugin(retryPlugin.plugin, { source: "cli", args: remaining, matchedName: retryPlugin.matchedName });
+        // #1885 — parse declared flags into ctx.flags (retry path).
+        const retryDeclared = (retryPlugin.plugin.manifest.cli?.flags ?? {}) as Record<string, any>;
+        const { parsePluginFlags: parsePluginFlagsRetry } = await import("./dispatch-flag-parse");
+        const retryParsedFlags = parsePluginFlagsRetry(retryDeclared, remaining);
+        const result = await invokePlugin(retryPlugin.plugin, {
+          source: "cli",
+          args: remaining,
+          matchedName: retryPlugin.matchedName,
+          ...(Object.keys(retryParsedFlags).length > 0 ? { flags: retryParsedFlags } : {}),
+        });
         if (result.ok && result.output) console.log(result.output);
         else if (!result.ok) { console.error(result.error); process.exit(result.exitCode ?? 1); }
         process.exit(0);
