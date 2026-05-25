@@ -1,7 +1,18 @@
 import { cmdPeek, cmdSend } from "../commands/shared/comm";
 import { UserError } from "../core/util/user-error";
 
-function printCommUsage(cmd: "hey" | "send", write: (line: string) => void = console.log): void {
+function printCommUsage(cmd: "hey" | "send" | "notify", write: (line: string) => void = console.log): void {
+  if (cmd === "notify") {
+    write(`usage: maw notify [--from <node:oracle>] <target> <message> [--approve] [--trust]`);
+    write("  Routine push — persists to recipient's ψ/inbox/ for them to pull via `maw inbox --unread`.");
+    write("  Does NOT inject into the target pane (unlike `maw hey`). #1882");
+    write("  --from <node:oracle>: explicit sender for SSH relays; env fallback: MAW_SENDER");
+    write("  target forms: same as maw hey (oracle-window | local:agent | session:window | node:session)");
+    write(`  e.g. maw notify mawjs-oracle "task done — fyi, recipient pulls when ready"`);
+    write(`       maw notify phaith:01-hojo:3 "routine cross-node ping"`);
+    write("  Pairs with `maw hey` (urgent, pane-injecting) and `maw broadcast` (fleet-wide).");
+    return;
+  }
   write(`usage: maw ${cmd} [--from <node:oracle>] <target> <message> [--inbox] [--force deprecated] [--approve] [--trust] [--no-verify-submit]`);
   write("  default: write receiver inbox and inject into the target pane");
   write("  --from <node:oracle>: explicit sender for SSH relays; env fallback: MAW_SENDER");
@@ -32,7 +43,12 @@ export async function routeComm(cmd: string, args: string[]): Promise<boolean> {
   // #1388: restore `maw send` to the same submitted delivery path as `maw hey`.
   // The raw-text compositor plugin remains available through lower-level tmux
   // verbs; top-level `send` must not leave text buffered without Enter.
-  if (cmd === "hey" || cmd === "send") {
+  // #1882: `notify` is a routine push — same transport as `hey --inbox` with a
+  //  cleaner verb. The --inbox flag is implicit; --force is N/A since notify
+  //  never pane-injects. Other flags (--from, --approve, --trust) parse the same.
+  if (cmd === "hey" || cmd === "send" || cmd === "notify") {
+    const isNotify = cmd === "notify";
+
     if (args[1] === "--help" || args[1] === "-h" || args[1] === "-help") {
       printCommUsage(cmd);
       return true;
@@ -40,7 +56,7 @@ export async function routeComm(cmd: string, args: string[]): Promise<boolean> {
 
     const rest = args.slice(1);
     let force = false;
-    let inboxOnly = false;
+    let inboxOnly = isNotify;  // #1882 — notify always inbox-only
     // #842 Sub-C — `--approve` bypasses the cross-scope ACL queue gate.
     // Operator-explicit opt-in for THIS message; mirrors the consent
     // `--pin` escape hatch already wired in #644. Optional `--trust`
@@ -100,7 +116,11 @@ export async function routeComm(cmd: string, args: string[]): Promise<boolean> {
       throw new UserError(`missing message for '${target}'`);
     }
     if (force) {
-      console.error("\x1b[90mnote: --force is deprecated; maw hey delivers by default. Use --inbox to queue without pane injection.\x1b[0m");
+      if (isNotify) {
+        console.error("\x1b[90mnote: --force is not meaningful for notify (delivery is always inbox-only).\x1b[0m");
+      } else {
+        console.error("\x1b[90mnote: --force is deprecated; maw hey delivers by default. Use --inbox to queue without pane injection.\x1b[0m");
+      }
     }
     await cmdSend(target, msgArgs.join(" "), force, { approve, trust, inboxOnly, ...(noVerifySubmit ? { noVerifySubmit } : {}), ...(from ? { from } : {}) });
     return true;
