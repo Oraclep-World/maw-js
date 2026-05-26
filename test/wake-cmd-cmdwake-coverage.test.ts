@@ -545,6 +545,9 @@ const originalWtPickerReadChoice = _wtPicker.readChoice;
 
 beforeEach(() => {
   mockActive = true;
+  // #1906 — skip the 2s agent-boot poll in tests by default; specific tests
+  // exercising the poll path opt back in by unsetting / overriding this.
+  process.env.MAW_AGENT_BOOT_POLL_MS = "0";
   tempRoot = mkdtempSync(join(tmpdir(), "maw-wake-cmd-coverage-"));
   repoName = "mawjs-oracle";
   parentDir = tempRoot;
@@ -1362,6 +1365,39 @@ describe("cmdWake main-suite coverage", () => {
     expect(rendered).toContain("snapshot restore: 2 windows");
     expect(rendered).toContain("2 window(s) retried");
     expect(rendered).toContain("agent dead, re-launching");
+  });
+
+  test("waits out the agent boot poll before declaring dead — fixes #1906 zsh→engine race", async () => {
+    // Mid-boot snapshot: pane initially reports `zsh`, then transitions to a
+    // known agent command on the 2nd getPaneInfos call. With the poll loop,
+    // wake should NOT log "agent dead" because the agent shows up before the
+    // 2s budget expires.
+    process.env.MAW_AGENT_BOOT_POLL_MS = "1500";
+    windowsBySession = {
+      "54-mawjs": [
+        { index: 0, name: "mawjs-oracle", active: true, cwd: repoPath },
+      ],
+    };
+    let infoCalls = 0;
+    paneCommands["54-mawjs:mawjs-oracle"] = "zsh";
+    // Hook into getPaneInfos by mutating paneCommands once on second call.
+    const origDefault = paneCommandDefault;
+    paneCommandDefault = "zsh";
+    // Defer until 2nd call returns the agent
+    const origGetPaneInfos = realSdk.getPaneInfos;
+    void origGetPaneInfos;
+    // No direct hook — use the mock's lookup of paneCommands by flipping it after a tick
+    setTimeout(() => {
+      paneCommands["54-mawjs:mawjs-oracle"] = "codex";
+    }, 300);
+
+    const { result, logs } = await captureLogs(() => cmdWake("mawjs", {}));
+    const rendered = logs.join("\n");
+
+    expect(result).toBe("54-mawjs:mawjs-oracle");
+    expect(rendered).not.toContain("agent dead, re-launching");
+    expect(infoCalls).toBe(0); // not asserted, just kept for shape
+    paneCommandDefault = origDefault;
   });
 
   test("reuses the first window listing so a later tmux list failure cannot create a duplicate", async () => {

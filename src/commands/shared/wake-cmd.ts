@@ -1141,10 +1141,28 @@ export async function cmdWake(oracle: string, opts: WakeOptions): Promise<string
         await recordWakeSnapshot();
         return target;
       }
-      // Check if agent is actually alive in the pane
-      const infos = await getPaneInfos([target]);
-      const info = infos[target];
-      const agentAlive = info && isAgentCommand(info.command);
+      // Check if agent is actually alive in the pane.
+      // #1906 — when an engine was just launched (e.g. via the new-window path
+      // below), `pane_current_command` may still show `zsh` while the launched
+      // engine is mid-boot. Poll briefly before declaring it dead so we don't
+      // double-launch and echo the second command into the agent's chat input.
+      let infos = await getPaneInfos([target]);
+      let info = infos[target];
+      let agentAlive = info && isAgentCommand(info.command);
+      if (!agentAlive) {
+        const POLL_TIMEOUT_MS = Number(process.env.MAW_AGENT_BOOT_POLL_MS ?? 2000);
+        const POLL_INTERVAL_MS = 200;
+        const start = Date.now();
+        while (Date.now() - start < POLL_TIMEOUT_MS) {
+          await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
+          infos = await getPaneInfos([target]);
+          info = infos[target];
+          if (info && isAgentCommand(info.command)) {
+            agentAlive = true;
+            break;
+          }
+        }
+      }
 
       if (!agentAlive) {
         console.log(`\x1b[33m⚡\x1b[0m '${existingWindow}' in ${session} — agent dead, re-launching...`);
