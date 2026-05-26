@@ -14,6 +14,11 @@ function printCommUsage(cmd: "hey" | "send" | "notify", write: (line: string) =>
     return;
   }
   write(`usage: maw ${cmd} [--from <node:oracle>] <target> <message> [--inbox] [--force deprecated] [--approve] [--trust] [--no-verify-submit]`);
+  if (cmd === "send") {
+    write("  note: top-level `maw send` is an alias of `maw hey` (#1388 / #1915) — both pane-inject");
+    write("        with a signed identity envelope and a trailing Enter. For raw text (no envelope,");
+    write("        no Enter), use `maw send-text`.");
+  }
   write("  default: write receiver inbox and inject into the target pane");
   write("  --from <node:oracle>: explicit sender for SSH relays; env fallback: MAW_SENDER");
   write("  --inbox: write receiver inbox only; skip pane injection");
