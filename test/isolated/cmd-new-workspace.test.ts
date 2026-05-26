@@ -535,4 +535,64 @@ describe("cmdNew workspace session factory", () => {
     expect(newSessionCalls).toEqual([]);
     expect(attached).toEqual(["my-project"]);
   });
+
+  describe("--dry-run (#1913)", () => {
+    test("dry-run skips newSession + rememberWorkspaceLaunch + attach", async () => {
+      const lines: string[] = [];
+      const logSpy = spyOn(console, "log").mockImplementation((line: string) => {
+        lines.push(String(line));
+      });
+      try {
+        await cmdNew(["taster", "--dry-run", "--no-attach"]);
+      } finally {
+        logSpy.mockRestore();
+      }
+      expect(newSessionCalls).toEqual([]);
+      expect(setOptionCalls).toEqual([]);
+      expect(attached).toEqual([]);
+      expect(lines.some(l => l.includes("[dry-run] would create"))).toBe(true);
+      expect(lines.some(l => /no tmux state changed/.test(l))).toBe(true);
+    });
+
+    test("dry-run with --split skips splitWindow + selectPane", async () => {
+      const lines: string[] = [];
+      const logSpy = spyOn(console, "log").mockImplementation((line: string) => {
+        lines.push(String(line));
+      });
+      try {
+        await cmdNew(["taster", "--split", "--dry-run"]);
+      } finally {
+        logSpy.mockRestore();
+      }
+      expect(splitWindowCalls).toEqual([]);
+      expect(selectPaneCalls).toEqual([]);
+      expect(lines.some(l => l.includes("[dry-run] would create split"))).toBe(true);
+    });
+
+    test("dry-run + --print emits JSON with dry_run: true", async () => {
+      const lines: string[] = [];
+      const logSpy = spyOn(console, "log").mockImplementation((line: string) => {
+        lines.push(String(line));
+      });
+      try {
+        await cmdNew(["taster", "--dry-run", "--print", "--no-attach"]);
+      } finally {
+        logSpy.mockRestore();
+      }
+      const jsonLines = lines.filter(l => l.startsWith("{"));
+      expect(jsonLines).toHaveLength(1);
+      const payload = JSON.parse(jsonLines[0]!);
+      expect(payload.dry_run).toBe(true);
+      expect(payload.session).toBe("taster");
+      expect(payload.pane_id).toBeUndefined();
+      expect(newSessionCalls).toEqual([]);
+    });
+
+    test("dry-run still validates name — invalid throws, no session created", async () => {
+      await expect(
+        cmdNew(["bad name", "--dry-run", "--no-attach"]),
+      ).rejects.toThrow(/invalid session name/);
+      expect(newSessionCalls).toEqual([]);
+    });
+  });
 });

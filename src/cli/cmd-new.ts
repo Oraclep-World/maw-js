@@ -75,7 +75,7 @@ export function validateWorkspaceWindowName(name: string): void {
 }
 
 function printUsage(write: (line: string) => void = console.log): void {
-  write("usage: maw new [session-name] [--path|-p <dir>] [--window <name>] [--cmd|-c <cmd>|--claude] [--shell] [--split] [--print|--json] [--attach|-a] [--no-attach]");
+  write("usage: maw new [session-name] [--path|-p <dir>] [--window <name>] [--cmd|-c <cmd>|--claude] [--shell] [--split] [--print|--json] [--attach|-a] [--no-attach] [--dry-run]");
   write("  Create a plain tmux workspace session with a shell window.");
   write("  --path, -p   Start the workspace shell in <dir> (absolute, relative, or ~/...)");
   write("  --window     Name the first tmux window (default: lead).");
@@ -85,6 +85,7 @@ function printUsage(write: (line: string) => void = console.log): void {
   write("  --split      Open as a split in the current tmux window instead of a new session.");
   write("  --print      Print a JSON payload with session/window/pane_id for scripts.");
   write("  --json       Alias for --print.");
+  write("  --dry-run    Show what WOULD happen without creating any tmux state. (#1913)");
   write("  Then bring oracles in with: maw team bring <team> [--session <session>]");
   write("  Oracle creation remains: maw awaken <name> (or maw bud <name>).");
 }
@@ -167,6 +168,7 @@ type NewWorkspacePrintPayload = {
   cwd: string;
   command?: string;
   reused: boolean;
+  dry_run?: boolean;
 };
 
 async function workspacePaneId(session: string, windowName: string): Promise<string | undefined> {
@@ -231,6 +233,7 @@ export async function cmdNew(argv: string[]): Promise<void> {
     "--split": Boolean,
     "--print": Boolean,
     "--json": Boolean,
+    "--dry-run": Boolean,
   }, 0);
 
   const explicitName = (flags._ as string[])[0];
@@ -293,6 +296,7 @@ export async function cmdNew(argv: string[]): Promise<void> {
   }
 
   const machineReadable = !!(flags["--print"] || flags["--json"]);
+  const dryRun = !!flags["--dry-run"];
   const split = !!flags["--split"];
   if (split && rawWindowName !== undefined) {
     throw new UserError("new: --window only applies when creating or reusing a workspace session, not --split");
@@ -300,13 +304,16 @@ export async function cmdNew(argv: string[]): Promise<void> {
 
   if (split) {
     const { session, window } = await currentTmuxSessionWindow();
-    const rawPaneId = await tmux.splitWindow(undefined, {
-      cwd,
-      ...(tmuxCommand ? { command: tmuxCommand } : {}),
-      printFormat: "#{pane_id}",
-    });
-    const paneId = rawPaneId?.trim() || undefined;
-    if (paneId) await tmux.selectPane(paneId, { title: name });
+    let paneId: string | undefined;
+    if (!dryRun) {
+      const rawPaneId = await tmux.splitWindow(undefined, {
+        cwd,
+        ...(tmuxCommand ? { command: tmuxCommand } : {}),
+        printFormat: "#{pane_id}",
+      });
+      paneId = rawPaneId?.trim() || undefined;
+      if (paneId) await tmux.selectPane(paneId, { title: name });
+    }
 
     if (machineReadable) {
       printMachinePayload({
@@ -316,10 +323,15 @@ export async function cmdNew(argv: string[]): Promise<void> {
         cwd,
         ...(startupCommand ? { command: startupCommand } : {}),
         reused: false,
+        ...(dryRun ? { dry_run: true } : {}),
       });
     } else {
       const mode = startupCommand ? "split shell + command" : "split shell";
-      console.log(`\x1b[32m✓\x1b[0m created ${mode} '${name}' in ${session}:${window}`);
+      const verb = dryRun ? `\x1b[36m·\x1b[0m [dry-run] would create` : `\x1b[32m✓\x1b[0m created`;
+      console.log(`${verb} ${mode} '${name}' in ${session}:${window}`);
+    }
+    if (dryRun && !machineReadable) {
+      console.log(`  \x1b[90mno tmux state changed (dry-run). Drop --dry-run to actually create.\x1b[0m`);
     }
     return;
   }
@@ -328,17 +340,20 @@ export async function cmdNew(argv: string[]): Promise<void> {
   let paneId: string | undefined;
   let payloadWindowName = windowName;
   if (!existed) {
-    const rawPaneId = await tmux.newSession(name, {
-      window: windowName,
-      cwd,
-      ...(tmuxCommand ? { command: tmuxCommand } : {}),
-      ...(machineReadable ? { printFormat: "#{pane_id}" } : {}),
-    });
-    paneId = rawPaneId?.trim() || undefined;
-    await rememberWorkspaceLaunch(name, cwd, startupCommand, windowName);
+    if (!dryRun) {
+      const rawPaneId = await tmux.newSession(name, {
+        window: windowName,
+        cwd,
+        ...(tmuxCommand ? { command: tmuxCommand } : {}),
+        ...(machineReadable ? { printFormat: "#{pane_id}" } : {}),
+      });
+      paneId = rawPaneId?.trim() || undefined;
+      await rememberWorkspaceLaunch(name, cwd, startupCommand, windowName);
+    }
     if (!machineReadable) {
       const mode = startupCommand ? `${windowName} shell + command` : `${windowName} shell`;
-      console.log(`\x1b[32m✓\x1b[0m created workspace session '${name}' (${mode})`);
+      const verb = dryRun ? `\x1b[36m·\x1b[0m [dry-run] would create` : `\x1b[32m✓\x1b[0m created`;
+      console.log(`${verb} workspace session '${name}' (${mode})`);
     }
   } else {
     const existingLaunch = await readWorkspaceLaunch(name);
@@ -354,7 +369,10 @@ export async function cmdNew(argv: string[]): Promise<void> {
       );
     }
     paneId = machineReadable ? await workspacePaneId(name, effectiveWindowName) : undefined;
-    if (!machineReadable) console.log(`\x1b[36m→\x1b[0m session exists: ${name}`);
+    if (!machineReadable) {
+      const prefix = dryRun ? `\x1b[36m·\x1b[0m [dry-run] would reuse` : `\x1b[36m→\x1b[0m session exists:`;
+      console.log(`${prefix} ${name}`);
+    }
   }
 
   if (machineReadable) {
@@ -365,7 +383,15 @@ export async function cmdNew(argv: string[]): Promise<void> {
       cwd,
       ...(startupCommand ? { command: startupCommand } : {}),
       reused: existed,
+      ...(dryRun ? { dry_run: true } : {}),
     });
+  }
+
+  if (dryRun) {
+    if (!machineReadable) {
+      console.log(`  \x1b[90mno tmux state changed (dry-run). Drop --dry-run to actually create.\x1b[0m`);
+    }
+    return;
   }
 
   const decision = decideNewWorkspaceAttach({
