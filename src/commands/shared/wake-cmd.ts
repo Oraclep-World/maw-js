@@ -8,7 +8,7 @@ import { normalizeTarget } from "../../core/matcher/normalize-target";
 import { assertValidOracleName } from "../../core/fleet/validate";
 import { canonicalSessionName } from "../../core/fleet/session-name";
 import { resolveOracle, findWorktrees, findReusableWorktreeBySlug, getSessionMap, resolveFleetSession, detectSession, setSessionEnv, sanitizeBranchName } from "./wake-resolve";
-import { attachToSession, ensureSessionRunning, createWorktree, reconcileParentClaudeDir } from "./wake-session";
+import { attachToSession, ensureSessionRunning, createWorktree, reconcileParentClaudeDir, waitForEngine } from "./wake-session";
 import { maybeOpenWindow, maybeSplit } from "./wake-maybe-split";
 import { runWakeLifecycleHooks } from "../../plugin/lifecycle";
 import { parseWakeTarget, ensureCloned } from "./wake-target";
@@ -944,6 +944,7 @@ export async function cmdWake(oracle: string, opts: WakeOptions): Promise<string
     , {
       hasSession: tmux.hasSession,
     });
+    await waitForEngine(`${session}:${mainWindowName}`, getPaneInfos, isAgentCommand);
     console.log(`\x1b[32m+\x1b[0m created session '${session}' (main: ${mainWindowName})`);
 
     // Auto-register agent in config.agents so federation peers can route to it (#285)
@@ -978,6 +979,7 @@ export async function cmdWake(oracle: string, opts: WakeOptions): Promise<string
         await tmux.newWindow(session, wt.windowName, { cwd: wt.path });
         await new Promise(r => setTimeout(r, 300));
         await tmux.sendText(`${session}:${wt.windowName}`, buildCommandInDir(wt.windowName, wt.path, opts.engine));
+        await waitForEngine(`${session}:${wt.windowName}`, getPaneInfos, isAgentCommand);
         existingWindows.add(wt.windowName);
         console.log(`\x1b[32m+\x1b[0m window: ${wt.windowName}`);
       }
