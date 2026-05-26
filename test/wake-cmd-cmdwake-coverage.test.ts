@@ -545,6 +545,10 @@ const originalWtPickerReadChoice = _wtPicker.readChoice;
 
 beforeEach(() => {
   mockActive = true;
+  // #1906 — skip waitForEngine's poll budget in tests so existing-window
+  // re-launch + new-session paths return immediately. Specific tests
+  // exercising the poll opt back in by overriding this.
+  process.env.MAW_AGENT_BOOT_POLL_MS = "0";
   tempRoot = mkdtempSync(join(tmpdir(), "maw-wake-cmd-coverage-"));
   repoName = "mawjs-oracle";
   parentDir = tempRoot;

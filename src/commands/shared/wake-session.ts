@@ -85,10 +85,15 @@ export async function waitForEngine(
   paneTarget: string,
   getPaneInfos: (targets: string[]) => Promise<Record<string, { command: string }>>,
   isAgentCommand: (cmd: string | null | undefined) => boolean,
-  timeoutMs = 5000,
+  timeoutMs?: number,
   pollIntervalMs = 250,
 ): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs;
+  // Env-gated override so tests can short-circuit the poll budget.
+  // MAW_AGENT_BOOT_POLL_MS=0 → skip the poll entirely (return false immediately).
+  const envBudget = process.env.MAW_AGENT_BOOT_POLL_MS;
+  const effectiveTimeout = envBudget !== undefined ? Number(envBudget) : (timeoutMs ?? 5000);
+  if (effectiveTimeout <= 0) return false;
+  const deadline = Date.now() + effectiveTimeout;
   while (Date.now() < deadline) {
     try {
       const infos = await getPaneInfos([paneTarget]);
