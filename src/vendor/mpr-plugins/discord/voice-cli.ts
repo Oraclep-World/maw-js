@@ -2,11 +2,18 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "
 import { dirname, join } from "path";
 import { homedir } from "os";
 import { decryptToken, findGhqPath, listPassTokens } from "./lib";
+import {
+  configuredBots,
+  discordDefaults,
+  loadDiscordConfig,
+  type DiscordDefaultsConfig,
+} from "./config";
 
 interface VoiceBotConfig {
   bot: string;
   voiceProfile?: string;
   tokenName?: string;
+  appId?: string;
 }
 
 interface VoiceCliOpts {
@@ -18,15 +25,24 @@ interface VoiceCliOpts {
 const DEFAULT_SERVER_URL = "http://localhost:7799";
 
 function parseOpts(args: string[]): VoiceCliOpts & { bot?: string } {
+  const defaults = discordDefaults();
   const opts: VoiceCliOpts & { bot?: string } = {
     all: args.includes("--all"),
-    serverUrl: process.env.MAW_DISCORD_SERVER_URL ?? DEFAULT_SERVER_URL,
+    serverUrl: process.env.MAW_DISCORD_SERVER_URL ?? defaults.serverUrl ?? DEFAULT_SERVER_URL,
+    voiceProfile: defaults.voiceProfile,
   };
-  const serverIdx = args.indexOf("--server");
-  if (serverIdx !== -1 && args[serverIdx + 1]) opts.serverUrl = args[serverIdx + 1]!;
-  const profileIdx = args.indexOf("--voice-profile");
-  if (profileIdx !== -1 && args[profileIdx + 1]) opts.voiceProfile = args[profileIdx + 1]!;
-  opts.bot = args.find((arg) => !arg.startsWith("--"));
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
+    if (arg === "--server" && args[i + 1]) {
+      opts.serverUrl = args[++i]!;
+    } else if (arg === "--voice-profile" && args[i + 1]) {
+      opts.voiceProfile = args[++i]!;
+    } else if (arg === "--all") {
+      opts.all = true;
+    } else if (!arg.startsWith("--") && !opts.bot) {
+      opts.bot = arg;
+    }
+  }
   return opts;
 }
 
@@ -76,6 +92,10 @@ function configPaths(): string[] {
 }
 
 function loadConfiguredBots(): VoiceBotConfig[] {
+  const config = loadDiscordConfig();
+  const configBots = configuredBots(config);
+  if (configBots.length > 0) return configBots;
+
   for (const path of configPaths()) {
     if (!existsSync(path)) continue;
     const parsed = JSON.parse(readFileSync(path, "utf8")) as
@@ -104,12 +124,38 @@ async function resolveOracleRepo(bot: string): Promise<string | null> {
 async function resolveToken(bot: string, tokenName?: string): Promise<string> {
   const tokens = listPassTokens();
   const entry = tokenName
-    ? tokens.find((token) => token.name === tokenName || token.name === `${tokenName}-token`)
+    ? tokens.find(
+        (token) =>
+          token.name === tokenName ||
+          token.name === `${tokenName}-token` ||
+          token.bot === tokenName,
+      )
     : tokens.find((token) => token.bot === bot || token.name === `${bot}-token`);
   if (!entry) throw new Error(`no pass token for ${bot}`);
   const token = await decryptToken(entry.name);
   if (!token) throw new Error(`failed to decrypt discord/${entry.name}`);
   return token;
+}
+
+function compactEnv(env: Record<string, string | undefined>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(env).filter((entry): entry is [string, string] => Boolean(entry[1])),
+  );
+}
+
+function defaultEnv(defaults: DiscordDefaultsConfig): Record<string, string> {
+  const claudeModel = defaults.claudeModel ?? "sonnet";
+  return compactEnv({
+    DC_OWNER_IDS: defaults.ownerIds,
+    TYPHOON_API_KEY: defaults.typhoonApiKey,
+    GROQ_API_KEY: defaults.groqApiKey,
+    MQTT_URL: defaults.mqttUrl,
+    MQTT_USER: defaults.mqttUser,
+    MQTT_PASS: defaults.mqttPass,
+    CLAUDE_MODEL: claudeModel,
+    CLAUDE_ARGS: `--model ${claudeModel}`,
+    VOICE_PROFILE: defaults.voiceProfile,
+  });
 }
 
 async function serverBot(serverUrl: string, bot: string): Promise<any | null> {
@@ -149,6 +195,7 @@ async function wakeOne(
   const repo = await resolveVoiceBotRepo();
   const oracleRepo = await resolveOracleRepo(bot.bot);
   const token = await resolveToken(bot.bot, bot.tokenName);
+  const defaults = discordDefaults();
   const proc = Bun.spawn(["bun", join(repo, "src", "index.ts")], {
     cwd: repo,
     stdin: "ignore",
@@ -156,12 +203,17 @@ async function wakeOne(
     stderr: "ignore",
     env: {
       ...process.env,
+      ...defaultEnv(defaults),
       DISCORD_TOKEN: token,
       BOT_NAME: bot.bot,
       SERVER_URL: opts.serverUrl,
       MAW_DISCORD_SERVER_URL: opts.serverUrl,
       ORACLE_REPO: oracleRepo || undefined,
-      VOICE_PROFILE: opts.voiceProfile ?? bot.voiceProfile ?? "premwadee",
+      VOICE_PROFILE:
+        opts.voiceProfile ??
+        bot.voiceProfile ??
+        defaults.voiceProfile ??
+        "premwadee",
     },
   });
   proc.unref?.();

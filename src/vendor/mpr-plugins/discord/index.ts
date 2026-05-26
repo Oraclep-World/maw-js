@@ -7,6 +7,7 @@ import { cmdGuilds, cmdChannels, cmdMembers, cmdInventory } from "./inventory";
 import { startServer } from "./server";
 import { cmdVoiceFleet } from "./voice-cli";
 import { decryptToken, listPassTokens } from "./lib";
+import { loadDiscordConfig, resolveConfiguredBot } from "./config";
 import { readFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -55,7 +56,7 @@ function printUsage(log: (s: string) => void): void {
   log("                                     end-to-end Discord-online for a bot on this host");
   log("  access <bot> <list|show|map|add|rm|set|allow|lockdown> [...]");
   log("                                     channel + allowlist management per bot (NEW v0.4)");
-  log("  server [--port N] [--token bot] [--no-discord] [--no-register]");
+  log("  server [bot] [--port N] [--token bot] [--no-discord] [--no-register]");
   log("                                     start maw discord server for voice bot v2");
   log("  wake <bot|--all> [--server URL] [--voice-profile name]");
   log("                                     start voice-bot v2 process(es)");
@@ -142,8 +143,13 @@ export default async function handler(ctx: InvokeContext): Promise<InvokeResult>
 
     if (sub === "server") {
       const opts = parseServerArgs(args.slice(1));
-      const token = await resolveServerToken(opts.tokenName);
+      const config = loadDiscordConfig();
+      const bot = resolveConfiguredBot(opts.bot, config);
+      const tokenBot = opts.tokenName ? resolveConfiguredBot(opts.tokenName, config) : null;
+      const tokenName = tokenBot?.tokenName ?? opts.tokenName ?? bot?.tokenName ?? bot?.bot;
+      const token = await resolveServerToken(tokenName);
       const applicationId =
+        bot?.appId ??
         process.env.MAW_DISCORD_APPLICATION_ID ??
         process.env.DISCORD_APPLICATION_ID ??
         process.env.DISCORD_CLIENT_ID;
@@ -156,7 +162,7 @@ export default async function handler(ctx: InvokeContext): Promise<InvokeResult>
       const port =
         opts.port ??
         (Number(process.env.MAW_DISCORD_SERVER_PORT ?? process.env.VOICE_SERVER_PORT) || 7799);
-      log(`maw discord server listening on port ${port}`);
+      log(`maw discord server listening on port ${port}${bot ? ` (${bot.bot})` : ""}`);
       // Keep process alive — server must stay running
       await new Promise(() => {});
       return { ok: true, output: logs.join("\n") };
@@ -191,12 +197,14 @@ function parseServerArgs(args: string[]): {
   startDiscord?: boolean;
   registerCommands?: boolean;
   tokenName?: string;
+  bot?: string;
 } {
   const opts: {
     port?: number;
     startDiscord?: boolean;
     registerCommands?: boolean;
     tokenName?: string;
+    bot?: string;
   } = {};
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
@@ -208,6 +216,8 @@ function parseServerArgs(args: string[]): {
       opts.startDiscord = false;
     } else if (arg === "--no-register") {
       opts.registerCommands = false;
+    } else if (!arg.startsWith("--") && !opts.bot) {
+      opts.bot = arg;
     }
   }
   return opts;
