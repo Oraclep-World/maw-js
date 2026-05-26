@@ -146,7 +146,8 @@ describe("health impl second-pass coverage", () => {
     expect(out).toContain("maw server         HTTP 418 (probe)");
     expect(out).toContain("disk /tmp          4G free");
     expect(out).toContain("memory             unknown");
-    expect(out).toContain("pm2 maw            pm2 not available");
+    // #1916 LOW-3 — pm2 absence is now silent (project moved off pm2)
+    expect(out).not.toContain("pm2 maw");
     expect(out).toContain("peer http://offline unreachable");
   });
 
@@ -167,7 +168,8 @@ describe("health impl second-pass coverage", () => {
     expect(out).toContain("maw server         online (:4321, ? sessions, probe ok)");
     expect(out).toContain("disk /tmp          unknown");
     expect(out).toContain("memory             0MB available");
-    expect(out).toContain("pm2 maw            not found");
+    // #1916 LOW-3 — pm2-with-no-maw entry is now silent
+    expect(out).not.toContain("pm2 maw");
     expect(out).toContain("peers              none configured");
   });
 

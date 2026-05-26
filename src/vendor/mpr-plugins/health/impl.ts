@@ -69,18 +69,19 @@ export async function cmdHealth() {
     checks.push({ name: "memory", status: "warn", detail: "unknown" });
   }
 
-  // 5. pm2
+  // 5. pm2 — #1916 LOW-3: project moved off pm2 (fleet-resume.ts now), so
+  // only report when pm2 actually has a maw process. A clean miss isn't a
+  // failure; if any process named 'maw' shows up the user wants to know.
   try {
     const pm2 = execSync("pm2 jlist 2>/dev/null", { encoding: "utf-8" });
     const procs = JSON.parse(pm2);
     const maw = procs.find((p: any) => p.name === "maw");
     if (maw) {
       checks.push({ name: "pm2 maw", status: maw.pm2_env?.status === "online" ? "ok" : "warn", detail: `${maw.pm2_env?.status} (pid ${maw.pid})` });
-    } else {
-      checks.push({ name: "pm2 maw", status: "fail", detail: "not found" });
     }
+    // No maw under pm2 is the expected state now — don't emit a check at all.
   } catch {
-    checks.push({ name: "pm2 maw", status: "warn", detail: "pm2 not available" });
+    // pm2 not installed — also expected. Stay silent.
   }
 
   // 6. peers — reconcile both config.peers (string[]) and config.namedPeers ({name,url}[])
