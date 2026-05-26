@@ -6,6 +6,12 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { UserError } from "../../src/core/util/user-error";
 
+// #1914 — cmdLayout now resolves the caller's current tmux window via
+// `tmux display-message` when MAW_TEST_MODE is unset. Tests mock the
+// downstream cmdTmuxLayout dep but cannot mock execSync mid-process, so
+// hard-set the env to keep target="." in this isolated harness.
+process.env.MAW_TEST_MODE = "1";
+
 let tmuxLsCalls: unknown[] = [];
 let tmuxLayoutCalls: unknown[][] = [];
 let wakeCalls: unknown[][] = [];
@@ -251,6 +257,30 @@ describe("direct handler invocation", () => {
 
     await expect(invokeDirectHandler("cmdLayout", [])).rejects.toThrow("layout: missing preset");
     expect(errors.join("\n")).toContain("usage: maw layout <preset>");
+  });
+
+  test("cmdLayout wraps downstream failures in a clean UserError (#1914)", async () => {
+    // Simulate cmdTmuxLayout throwing (e.g. select-layout failure) → should
+    // surface as `✗ maw layout: …` + UserError, not raw stack trace.
+    const origLayout = tmuxLayoutCalls;
+    tmuxLayoutCalls = [];
+    let threw: unknown;
+    const failingDeps = {
+      cmdTmuxLayout: async () => { throw new Error("select-layout failed for 'foo': boom"); },
+    };
+    // Re-import handler with failing dep injected via top-aliases deps param
+    const { invokeDirectHandler: invoke2 } = await import("../../src/cli/top-aliases");
+    logs = [];
+    errors = [];
+    try {
+      await invoke2("cmdLayout", ["tiled"], failingDeps);
+    } catch (e) {
+      threw = e;
+    }
+    expect(threw).toBeInstanceOf(UserError);
+    expect(errors.join("\n")).toContain("✗ maw layout:");
+    expect(errors.join("\n")).toContain("select-layout failed");
+    tmuxLayoutCalls = origLayout;
   });
 
   test("wake help prints usage without invoking wake", async () => {

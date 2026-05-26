@@ -374,7 +374,26 @@ export async function invokeDirectHandler(
       printLayoutUsage(error);
       throw new UserError("layout: missing preset");
     }
-    await directCmdTmuxLayout(".", preset);
+    // #1914 — resolve the caller's CURRENT window directly. Passing "."
+    // to the fleet-aware resolver fuzzy-matched stale fleet stems like
+    // "25-.bak202605130508discord" (any session name containing a dot).
+    let target = ".";
+    if (process.env.MAW_TEST_MODE !== "1") {
+      try {
+        const { execSync } = await import("child_process");
+        const raw = execSync(`tmux display-message -p '#{session_name}:#{window_name}'`, { stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
+        if (raw) target = raw;
+      } catch {
+        error("✗ maw layout: not in a tmux session — pass an explicit target: maw tmux layout <target> <preset>");
+        throw new UserError("layout: no current tmux window");
+      }
+    }
+    try {
+      await directCmdTmuxLayout(target, preset);
+    } catch (e: any) {
+      error(`✗ maw layout: ${e?.message ?? e}`);
+      throw new UserError(`layout: ${e?.message ?? e}`);
+    }
     return;
   }
 
