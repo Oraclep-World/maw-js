@@ -198,7 +198,7 @@ async function resolveLocalOracleWithPicker(
 
 export async function resolveOracle(
   oracle: string,
-  opts?: { allLocal?: boolean },
+  opts?: { allLocal?: boolean; quietWorktreeScan?: boolean },
 ): Promise<{ repoPath: string; repoName: string; parentDir: string }> {
   // #997 — match against local *-oracle repos in ghq before remote lookups.
   // e.g. "v3" matches "arra-oracle-v3-oracle" so `maw wake v3` works like `maw ls -a`.
@@ -236,7 +236,13 @@ export async function resolveOracle(
   // or on a machine where ghq was never configured). Nat's insight: having a
   // worktree guarantees a git repo.
   try {
-    const worktreeResult = await resolveFromWorktrees(oracle, scanWorktrees, hostExec, existsSync);
+    // #1916 MED-2 — under dry-run we don't want unrelated ambiguous-binding
+    // errors from worktree scan polluting stderr (the user asked "what WOULD
+    // wake do for X", not "what's wrong with the rest of the fleet").
+    const scanFn = opts?.quietWorktreeScan
+      ? () => scanWorktrees({ error: () => { /* silenced under dry-run */ } })
+      : scanWorktrees;
+    const worktreeResult = await resolveFromWorktrees(oracle, scanFn, hostExec, existsSync);
     if (worktreeResult) return worktreeResult;
   } catch { /* scanWorktrees failed — fall through to clone */ }
 

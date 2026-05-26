@@ -190,20 +190,42 @@ export interface AttachShellPlan {
   command: string;
 }
 
+export interface AttachShellResolveDeps {
+  /** Read a tmux session option; returns undefined when unset. Injected for testing. */
+  readSessionOption?: (session: string, option: string) => string | undefined;
+}
+
 export function buildAttachShellPlan(
   requestedName: string,
   sessionName: string,
   fleet: FleetSessionLike[],
+  deps: AttachShellResolveDeps = {},
 ): AttachShellPlan {
   const session = fleet.find(f => f.name === sessionName) ??
     fleet.find(f => sessionName.endsWith(`-${f.name}`));
   const window = session?.windows?.[0];
-  if (!window?.repo) {
-    throw new Error(`cannot resolve repo path for '${requestedName}' in session '${sessionName}'`);
+  let cwd: string;
+  let windowBaseName: string;
+  if (window?.repo) {
+    cwd = join(getGhqRoot(), window.repo);
+    windowBaseName = window.name || requestedName;
+  } else {
+    // #1916 MED-4 — workspace sessions (created via `maw new`) have no fleet
+    // repo. Fall back to the @maw_new_cwd tmux option that `maw new` stamps
+    // on the session, so `maw a <workspace> --shell` lands in the session's
+    // real cwd instead of erroring.
+    const workspaceCwd = deps.readSessionOption?.(sessionName, "@maw_new_cwd");
+    if (workspaceCwd) {
+      cwd = workspaceCwd;
+      windowBaseName = window?.name || sessionName;
+    } else {
+      throw new Error(
+        `cannot resolve repo path for '${requestedName}' in session '${sessionName}' — no oracle entry and no @maw_new_cwd set (try plain \`maw a ${requestedName}\` without --shell)`,
+      );
+    }
   }
-  const cwd = join(getGhqRoot(), window.repo);
-  const targetWindow = `${sessionName}:${window.name}`;
-  const windowName = `${sanitizeTmuxName(window.name || requestedName)}-shell`.slice(0, 80);
+  const targetWindow = `${sessionName}:${windowBaseName}`;
+  const windowName = `${sanitizeTmuxName(windowBaseName || requestedName)}-shell`.slice(0, 80);
   const command = `cd ${shellArg(cwd)} && exec ${process.env.SHELL || "zsh"}`;
   return { sessionName, targetWindow, windowName, cwd, command };
 }
@@ -214,7 +236,22 @@ async function openShellForSession(
   opts: AttachOpts,
   fleet: FleetSessionLike[],
 ): Promise<void> {
-  const plan = buildAttachShellPlan(requestedName, sessionName, fleet);
+  // #1916 MED-4 — pass a real readSessionOption so workspace sessions
+  // (no fleet entry) can fall back to their @maw_new_cwd.
+  const { hostExec } = await import("../../../sdk");
+  const readSessionOption = (session: string, option: string): string | undefined => {
+    try {
+      // hostExec is async but resolveSessionOptionSync isn't available; do a
+      // best-effort sync wrap via execSync to keep buildAttachShellPlan sync.
+      const { execSync } = require("child_process");
+      const out = String(execSync(`tmux show-options -qv -t '${session}' ${option}`, { stdio: ["ignore", "pipe", "ignore"] })).trim();
+      return out || undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  void hostExec;
+  const plan = buildAttachShellPlan(requestedName, sessionName, fleet, { readSessionOption });
   const split = opts.split !== false;
   const claudeLikeCaller = split ? await isClaudeLikeCaller() : false;
   const useSplit = split && !claudeLikeCaller;

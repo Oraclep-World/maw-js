@@ -799,7 +799,7 @@ export async function cmdWake(oracle: string, opts: WakeOptions): Promise<string
     resolved = { repoPath, repoName: repoPath.split("/").pop()!, parentDir: repoPath.replace(/\/[^/]+$/, "") };
     if (!opts.task && !opts.wt) opts.wt = resolved.repoName.replace(/-/g, "");
   } else {
-    resolved = await resolveOracle(oracle, { allLocal: opts.allLocal });
+    resolved = await resolveOracle(oracle, { allLocal: opts.allLocal, quietWorktreeScan: !!opts.dryRun });
   }
 
   const { repoPath, repoName, parentDir } = resolved;

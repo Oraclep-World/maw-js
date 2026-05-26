@@ -427,4 +427,28 @@ describe("attach impl command routing", () => {
     ]);
     expect(logs.join("\n")).toContain("waking 50-mawjs");
   });
+
+  test("buildAttachShellPlan falls back to @maw_new_cwd for workspace sessions (#1916 MED-4)", async () => {
+    const { buildAttachShellPlan } = await import(`${attachRoot}/impl.ts`);
+
+    // Workspace session has no fleet entry. With @maw_new_cwd set, plan uses it.
+    const plan = buildAttachShellPlan("taster", "taster", [], {
+      readSessionOption: (session: string, option: string) => {
+        if (session === "taster" && option === "@maw_new_cwd") return "/tmp/work";
+        return undefined;
+      },
+    });
+    expect(plan.sessionName).toBe("taster");
+    expect(plan.cwd).toBe("/tmp/work");
+    expect(plan.command).toContain("cd '/tmp/work'");
+    expect(plan.windowName).toContain("-shell");
+  });
+
+  test("buildAttachShellPlan still throws with actionable hint when no fleet and no @maw_new_cwd", async () => {
+    const { buildAttachShellPlan } = await import(`${attachRoot}/impl.ts`);
+
+    expect(() => buildAttachShellPlan("orphan", "orphan", [], {
+      readSessionOption: () => undefined,
+    })).toThrow(/no oracle entry and no @maw_new_cwd set/);
+  });
 });
