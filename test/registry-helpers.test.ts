@@ -40,7 +40,7 @@ describe("plugin registry runtime helpers", () => {
   test("scanDirs honors MAW_PLUGINS_DIR override", () => {
     saveEnv("MAW_PLUGINS_DIR");
     process.env.MAW_PLUGINS_DIR = "/tmp/maw-test-plugins";
-    expect(scanDirs()).toEqual(["/tmp/maw-test-plugins"]);
+    expect(scanDirs(tempDir("maw-clean-cwd-"))).toEqual(["/tmp/maw-test-plugins"]);
   });
 
   test("scanDirs adds project .maw/plugins from the cwd ancestor chain", () => {
