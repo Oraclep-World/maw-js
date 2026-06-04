@@ -105,6 +105,16 @@ function matchGlob(pattern: string, name: string): boolean {
   return false;
 }
 
+function commandMatchNames(agentName: string): string[] {
+  const names = [agentName];
+  if (agentName && !agentName.endsWith("-oracle")) names.push(`${agentName}-oracle`);
+  return names;
+}
+
+function matchesAgentPattern(pattern: string, agentName: string): boolean {
+  return commandMatchNames(agentName).some((name) => matchGlob(pattern, name));
+}
+
 function shouldAutoDiscordChannels(cwd?: string): boolean {
   if (!cwd) return false;
   try { return existsSync(join(cwd, ".discord")); } catch { return false; }
@@ -124,7 +134,7 @@ function legacyCommandForAgent(
     cmd = commands.default || "claude";
     for (const [pattern, command] of Object.entries(commands)) {
       if (pattern === "default") continue;
-      if (matchGlob(pattern, agentName)) { cmd = command; break; }
+      if (matchesAgentPattern(pattern, agentName)) { cmd = command; break; }
     }
   }
 
@@ -151,7 +161,7 @@ function selectEngineForAgent(
   let engineName = "default";
   for (const pattern of Object.keys(commands)) {
     if (pattern === "default") continue;
-    if (matchGlob(pattern, agentName)) { engineName = pattern; break; }
+    if (matchesAgentPattern(pattern, agentName)) { engineName = pattern; break; }
   }
 
   return resolveEngine(engineName, config);
@@ -229,8 +239,8 @@ export function buildCommandFromConfig(
 
   // Inject --session-id if configured for this agent
   const sessionIds: Record<string, string> = config.sessionIds || {};
-  const sessionId = sessionIds[agentName]
-    || Object.entries(sessionIds).find(([p]) => p !== "default" && matchGlob(p, agentName))?.[1];
+  const sessionId = commandMatchNames(agentName).map((name) => sessionIds[name]).find(Boolean)
+    || Object.entries(sessionIds).find(([p]) => p !== "default" && matchesAgentPattern(p, agentName))?.[1];
   if (sessionId) {
     cmd = applyResumeFlag(cmd, engine, sessionId, genericRenderer);
   }

@@ -89,6 +89,13 @@ describe("buildCommand — post-#541 contract", () => {
     expect(buildCommand("foo-bar")).toBe("echo hi");
   });
 
+  test("short oracle slug can match window-name command overrides", () => {
+    fakeConfig.commands = { default: "claude --continue", "foo-oracle": "bash start.sh" };
+
+    expect(buildCommand("foo")).toBe("bash start.sh");
+    expect(buildCommandInDir("foo-oracle", "/tmp/foo")).toBe("bash start.sh");
+  });
+
   test('pattern-match ignores the literal "default" key', () => {
     // Agent literally named "default" must still hit the default branch, not
     // match the "default" key as a pattern.
