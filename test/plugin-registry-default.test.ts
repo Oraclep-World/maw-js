@@ -18,6 +18,7 @@ let originalPluginsDir: string | undefined;
 let originalMawHome: string | undefined;
 let originalWarnStateFile: string | undefined;
 let originalWarn: typeof console.warn;
+let originalCwd = "";
 let warns: string[] = [];
 
 function sha256(text: string): string {
@@ -82,6 +83,7 @@ beforeEach(() => {
   originalMawHome = process.env.MAW_HOME;
   originalWarnStateFile = process.env.MAW_WARN_STATE_FILE;
   originalWarn = console.warn;
+  originalCwd = process.cwd();
   warns = [];
 
   process.env.MAW_PLUGINS_DIR = pluginsDir;
@@ -94,6 +96,7 @@ beforeEach(() => {
 afterEach(() => {
   resetDiscoverCache();
   console.warn = originalWarn;
+  if (originalCwd) process.chdir(originalCwd);
   if (originalPluginsDir === undefined) delete process.env.MAW_PLUGINS_DIR;
   else process.env.MAW_PLUGINS_DIR = originalPluginsDir;
   if (originalMawHome === undefined) delete process.env.MAW_HOME;
@@ -109,6 +112,34 @@ describe("discoverPackages default-suite coverage", () => {
       scanDirs: () => [join(testRoot, "missing-root")],
       loadConfig: () => ({ disabledPlugins: [] }),
     })).toEqual([]);
+  });
+
+  test("default scan discovers cwd-local .maw/plugins additively with global plugins first", () => {
+    const project = join(testRoot, "workspace", "pkg");
+    const localPlugins = join(project, ".maw", "plugins");
+    const cwd = join(project, "src");
+    mkdirSync(cwd, { recursive: true });
+
+    writeEntryPlugin(pluginsDir, "global-only");
+    writeEntryPlugin(pluginsDir, "shared-name", { weight: 10 });
+    writeEntryPlugin(localPlugins, "local-only");
+    writeEntryPlugin(localPlugins, "shared-name", { weight: 1 });
+
+    process.chdir(cwd);
+    resetDiscoverCache();
+
+    const discovered = discoverPackages().map((p) => ({
+      name: p.manifest.name,
+      dir: p.dir,
+      weight: p.manifest.weight ?? 50,
+    }));
+
+    expect(discovered.map((p) => p.name).sort()).toEqual(["global-only", "local-only", "shared-name"]);
+    expect(discovered.find((p) => p.name === "shared-name")).toEqual({
+      name: "shared-name",
+      dir: join(pluginsDir, "shared-name"),
+      weight: 10,
+    });
   });
 
   test("memoizes default discovery until resetDiscoverCache is called", () => {
