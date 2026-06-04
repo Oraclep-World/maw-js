@@ -54,8 +54,8 @@ describe("plugin registry runtime helpers", () => {
     mkdirSync(packagePlugins, { recursive: true });
     mkdirSync(cwd, { recursive: true });
 
-    expect(discoverLocalPluginDirs(cwd)).toEqual([projectPlugins, packagePlugins]);
-    expect(scanDirs(cwd)).toEqual(["/tmp/maw-test-plugins", projectPlugins, packagePlugins]);
+    expect(discoverLocalPluginDirs(cwd)).toEqual([packagePlugins, projectPlugins]);
+    expect(scanDirs(cwd)).toEqual(["/tmp/maw-test-plugins", packagePlugins, projectPlugins]);
   });
 
   test("runtimeSdkVersion resolves and caches the bundled SDK package version", () => {

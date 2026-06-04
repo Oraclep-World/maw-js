@@ -26,7 +26,7 @@ export function discoverLocalPluginDirs(cwd = process.cwd()): string[] {
     if (parent === dir) break;
     dir = parent;
   }
-  return dirs.reverse();
+  return dirs;
 }
 
 export function scanDirs(cwd = process.cwd()): string[] {

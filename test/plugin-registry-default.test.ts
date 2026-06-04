@@ -114,16 +114,19 @@ describe("discoverPackages default-suite coverage", () => {
     })).toEqual([]);
   });
 
-  test("default scan discovers cwd-local .maw/plugins additively with global plugins first", () => {
+  test("default scan discovers cwd-local .maw/plugins additively with nearest local precedence", () => {
     const project = join(testRoot, "workspace", "pkg");
-    const localPlugins = join(project, ".maw", "plugins");
-    const cwd = join(project, "src");
+    const rootLocalPlugins = join(project, ".maw", "plugins");
+    const nearestLocalPlugins = join(project, "apps", "bot", ".maw", "plugins");
+    const cwd = join(project, "apps", "bot", "src");
     mkdirSync(cwd, { recursive: true });
 
     writeEntryPlugin(pluginsDir, "global-only");
-    writeEntryPlugin(pluginsDir, "shared-name", { weight: 10 });
-    writeEntryPlugin(localPlugins, "local-only");
-    writeEntryPlugin(localPlugins, "shared-name", { weight: 1 });
+    writeEntryPlugin(pluginsDir, "global-shared", { weight: 10 });
+    writeEntryPlugin(rootLocalPlugins, "local-only");
+    writeEntryPlugin(rootLocalPlugins, "local-shared", { weight: 20 });
+    writeEntryPlugin(nearestLocalPlugins, "local-shared", { weight: 5 });
+    writeEntryPlugin(nearestLocalPlugins, "global-shared", { weight: 1 });
 
     process.chdir(cwd);
     resetDiscoverCache();
@@ -134,12 +137,15 @@ describe("discoverPackages default-suite coverage", () => {
       weight: p.manifest.weight ?? 50,
     }));
 
-    expect(discovered.map((p) => p.name).sort()).toEqual(["global-only", "local-only", "shared-name"]);
-    expect(discovered.find((p) => p.name === "shared-name")).toEqual({
-      name: "shared-name",
-      dir: join(pluginsDir, "shared-name"),
+    expect(discovered.map((p) => p.name).sort()).toEqual(["global-only", "global-shared", "local-only", "local-shared"]);
+    expect(discovered.find((p) => p.name === "global-shared")).toEqual({
+      name: "global-shared",
+      dir: join(pluginsDir, "global-shared"),
       weight: 10,
     });
+    const localShared = discovered.find((p) => p.name === "local-shared");
+    expect(localShared?.weight).toBe(5);
+    expect(localShared?.dir.endsWith("/apps/bot/.maw/plugins/local-shared")).toBe(true);
   });
 
   test("memoizes default discovery until resetDiscoverCache is called", () => {
