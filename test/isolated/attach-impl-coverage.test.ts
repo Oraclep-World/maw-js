@@ -11,7 +11,7 @@ import { join } from "path";
 const attachRoot = join(import.meta.dir, "../../src/vendor/mpr-plugins/attach");
 
 type ResolveResult =
-  | { tier: 1; sessionName: string; ambiguousCandidates?: string[] }
+  | { tier: 1; sessionName: string; windowName?: string; ambiguousCandidates?: string[] }
   | { tier: 2; fleetName: string; ambiguousCandidates?: string[] }
   | { tier: 3; sessionName: string; node: string; peerUrl: string; sshAlias: string }
   | { tier: "error"; error: string; hint?: string }
@@ -273,6 +273,15 @@ describe("attach impl command routing", () => {
     await expect(cmdAttach("broken")).rejects.toThrow("tmux attach failed");
     expect(spawnCalls).toEqual([]);
     expect(tmuxAttachCalls).toEqual(["01-broken"]);
+  });
+
+  test("Tier 1 attach preserves resolved oracle window target", async () => {
+    resolveQueue = [{ tier: 1, sessionName: "01-yd-patient-flow", windowName: "yd-patient-flow-oracle" }];
+
+    await cmdAttach("yd-patient-flow");
+
+    expect(tmuxAttachCalls).toEqual(["01-yd-patient-flow:yd-patient-flow-oracle"]);
+    expect(logs.join("\n")).toContain("attaching to 01-yd-patient-flow:yd-patient-flow-oracle");
   });
 
   test("opens a shell split at the live oracle repo without attaching to claude", async () => {
