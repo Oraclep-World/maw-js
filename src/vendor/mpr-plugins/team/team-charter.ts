@@ -14,6 +14,8 @@ export interface TeamCharterMember {
   engine?: string;
   worktree?: boolean | string;
   queue?: string[];
+  node?: string;
+  channels?: boolean;
 }
 
 export interface TeamCharter {
@@ -232,6 +234,8 @@ function normalizeCharter(value: unknown): TeamCharter {
       ...(typeof m.worktree === "string" && m.worktree.trim() ? { worktree: m.worktree.trim() } : {}),
       ...(Array.isArray(m.queue) ? { queue: m.queue.filter((item): item is string => typeof item === "string" && item.trim()).map((item) => item.trim()) } : {}),
       ...(typeof m.queue === "string" && m.queue.trim() ? { queue: [m.queue.trim()] } : {}),
+      ...(typeof m.node === "string" && m.node.trim() ? { node: m.node.trim() } : {}),
+      ...(typeof m.channels === "boolean" ? { channels: m.channels } : {}),
     };
   });
   return {

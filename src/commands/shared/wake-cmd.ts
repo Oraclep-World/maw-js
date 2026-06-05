@@ -361,6 +361,8 @@ export interface WakeOptions {
   snapshotId?: string;
   /** Filesystem layout for newly-created worktrees (#1850): default nested, legacy sibling via --layout legacy. */
   layout?: WorktreeLayout;
+  /** Force Discord channel launch for Claude-like engines (#1999). */
+  channels?: boolean;
 }
 
 function isAttachOnlyWake(opts: WakeOptions): boolean {
@@ -383,13 +385,14 @@ function isAttachOnlyWake(opts: WakeOptions): boolean {
     && !opts.bud
     && !opts.signalOnBirth
     && !opts.engine
+    && !opts.channels
     && !opts.fromSnapshot
     && !opts.snapshotId;
 }
 
-function buildWakeCommand(windowName: string, cwd: string, opts: Pick<WakeOptions, "engine" | "parentSessionId" | "sessionId">): string {
+function buildWakeCommand(windowName: string, cwd: string, opts: Pick<WakeOptions, "engine" | "parentSessionId" | "sessionId" | "channels">): string {
   return prefixCommandWithSpawnSessionEnv(
-    buildCommandInDir(windowName, cwd, opts.engine),
+    buildCommandInDir(windowName, cwd, opts.channels ? { engine: opts.engine, channels: ["plugin:discord@claude-plugins-official"] } : opts.engine),
     { explicit: opts.parentSessionId, sessionId: opts.sessionId, cwd },
   );
 }

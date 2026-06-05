@@ -71,11 +71,104 @@ members:
     name: mawjs-codex
     engine: omx
     worktree: true
+    node: m5
+    channels: true
     queue:
       - next
 `);
     expect(charter.session).toBe("named-session");
-    expect(charter.members[0]).toMatchObject({ role: "coder", name: "mawjs-codex", engine: "omx", worktree: true, queue: ["next"] });
+    expect(charter.members[0]).toMatchObject({ role: "coder", name: "mawjs-codex", engine: "omx", worktree: true, node: "m5", channels: true, queue: ["next"] });
+  });
+
+  test("node-guarded members on another node are skipped, not reported missing or woken", async () => {
+    const root = tempRepo();
+    writeFileSync(join(root, ".maw", "teams", "nodes.yaml"), `
+name: nodes
+session: charter-session
+members:
+  - role: lead
+    name: mawjs-oracle
+    engine: claude
+  - role: bridge
+    name: mawjs-oss-world
+    engine: claude
+    node: oracle-world
+    channels: true
+`, "utf-8");
+    const { tmux, calls } = fakeTmux([
+      "charter-session|mawjs-oracle|claude|/wt/oracle|%1",
+    ]);
+    const wakes: any[] = [];
+
+    const status = await cmdTeamUp("nodes", { status: true }, {
+      cwd: root,
+      tmux,
+      loadConfigFn: () => ({ ...config, node: "m5" }),
+      cmdWakeFn: async (...a: any[]) => { wakes.push(a); return "woke"; },
+      logger: () => {},
+    });
+
+    expect(status.roster.map((m) => [m.role, m.state, m.skipReason])).toEqual([
+      ["lead", "live", undefined],
+      ["bridge", "skipped", "other node: oracle-world"],
+    ]);
+    expect(status.output).toContain("bridge\tclaude\tskipped\tskip (other node: oracle-world)");
+    expect(status.output).not.toContain("bridge\tclaude\tmissing");
+    expect(wakes).toHaveLength(0);
+
+    await cmdTeamUp("nodes", { force: true }, {
+      cwd: root,
+      tmux,
+      loadConfigFn: () => ({ ...config, node: "m5" }),
+      cmdWakeFn: async (...a: any[]) => { wakes.push(a); return "woke"; },
+      sleep: async () => {},
+      logger: () => {},
+    });
+    expect(wakes.map((w) => w[1].wt)).toEqual(["mawjs-oracle"]);
+    expect(calls.filter((c) => c[0] === "kill-window")).toHaveLength(1);
+  });
+
+  test("same-node channels member is wakeable with --channels and fresh wake passes channels", async () => {
+    const root = tempRepo();
+    writeFileSync(join(root, ".maw", "teams", "bridge.yaml"), `
+name: bridge
+session: charter-session
+members:
+  - role: bridge
+    name: mawjs-oss-world
+    engine: claude
+    node: oracle-world
+    channels: true
+`, "utf-8");
+    const { tmux } = fakeTmux([]);
+    const wakes: any[] = [];
+
+    const status = await cmdTeamUp("bridge", { status: true }, {
+      cwd: root,
+      tmux,
+      loadConfigFn: () => ({ ...config, node: "oracle-world" }),
+      logger: () => {},
+    });
+    expect(status.roster.map((m) => [m.role, m.state])).toEqual([["bridge", "missing"]]);
+    expect(status.output).toContain("wakeable --wt mawjs-oss-world -e claude --session charter-session --channels");
+
+    const dry = await cmdTeamUp("bridge", { dryRun: true }, {
+      cwd: root,
+      tmux,
+      loadConfigFn: () => ({ ...config, node: "oracle-world" }),
+      logger: () => {},
+    });
+    expect(dry.output).toContain("would fresh wake --wt mawjs-oss-world -e claude --session charter-session --channels");
+
+    await cmdTeamUp("bridge", {}, {
+      cwd: root,
+      tmux,
+      loadConfigFn: () => ({ ...config, node: "oracle-world" }),
+      cmdWakeFn: async (...a: any[]) => { wakes.push(a); return "woke"; },
+      sleep: async () => {},
+      logger: () => {},
+    });
+    expect(wakes).toEqual([[expect.any(String), { wt: "mawjs-oss-world", engine: "claude", session: "charter-session", repoPath: root, channels: true }]]);
   });
 
 
