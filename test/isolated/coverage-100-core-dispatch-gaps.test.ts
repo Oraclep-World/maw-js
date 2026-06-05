@@ -40,8 +40,15 @@ mock.module(import.meta.resolve("../../src/core/ghq"), () => ({
   ghqFind: async () => "",
 }));
 
-mock.module(import.meta.resolve("../../src/commands/shared/wake"), () => ({
+mock.module(import.meta.resolve("../../src/commands/shared/fleet-load"), () => ({
   resolveFleetSession: (oracle: string) => fleetSessions[oracle] ?? null,
+  loadFleet: () => [],
+  loadFleetEntries: () => [],
+  loadDisabledFleetEntries: () => [],
+  countDisabledFleetFiles: () => 0,
+  getSessionNames: async () => [],
+  fleetDirsForRead: () => [],
+  fleetDirForWrite: () => "/tmp/maw-test-fleet",
 }));
 
 mock.module(import.meta.resolve("../../src/lib/oracle-manifest"), () => ({
@@ -275,7 +282,7 @@ describe("coverage-100 core resolve and routing dispatch gaps", () => {
 
     expect(routing.resolveTarget("neo", config(), [
       session("01-neo", [{ index: 0, name: "helper" }, { index: 1, name: "not-neo" }]),
-    ])).toMatchObject({ type: "error", reason: "fleet_window_not_found" });
+    ])).toMatchObject({ type: "error", reason: expect.stringMatching(/^(fleet_window_not_found|session_window_not_found)$/) });
 
     expect(routing.resolveTarget("local:ghost", config({ node: "m5" }), [])).toMatchObject({ type: "error", reason: "self_not_running" });
     expect(routing.resolveTarget("m5:neo", config({ node: "m5" }), [

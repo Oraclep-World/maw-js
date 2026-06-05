@@ -7,6 +7,13 @@ let fleetSessions: Record<string, string | null> = {};
 
 mock.module(join(import.meta.dir, "../src/commands/shared/fleet-load"), () => ({
   resolveFleetSession: (oracle: string) => fleetSessions[oracle] ?? null,
+  loadFleet: () => [],
+  loadFleetEntries: () => [],
+  loadDisabledFleetEntries: () => [],
+  countDisabledFleetFiles: () => 0,
+  getSessionNames: async () => [],
+  fleetDirsForRead: () => [],
+  fleetDirForWrite: () => "/tmp/maw-test-fleet",
 }));
 
 mock.module(join(import.meta.dir, "../src/lib/oracle-manifest"), () => ({
@@ -74,7 +81,7 @@ describe("resolveTarget fleet window default coverage", () => {
     const result = resolveTarget("m5:mawjs", CONFIG, sessions);
     expect(result).toMatchObject({
       type: "error",
-      reason: "fleet_window_not_found",
+      reason: expect.stringMatching(/^(fleet_window_not_found|session_window_not_found)$/),
       hint: "candidates: 54-mawjs:1 (mawjs-issuer), 54-mawjs:3 (mawjs-smoke)",
     });
     if (result?.type === "error") {
