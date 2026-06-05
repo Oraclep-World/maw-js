@@ -8,9 +8,9 @@ import { tmpdir } from "os";
 // (core), which is tested but NOT dispatched, so `maw team up` was unreachable
 // despite green tests. Guard the copy that actually ships.
 import { parseTeamCharterText } from "../../src/vendor/mpr-plugins/team/team-charter";
-import { classifyMember, engineCommand } from "../../src/vendor/mpr-plugins/team/team-liveness";
+import { classifyMember, engineCommand, memberWakeOptions, memberWakeTarget } from "../../src/vendor/mpr-plugins/team/team-liveness";
 import { cmdTeamUp } from "../../src/vendor/mpr-plugins/team/team-up";
-import { cmdTeamDown } from "../../src/vendor/mpr-plugins/team/team-down";
+import { cmdTeamDown, TEAM_LIFECYCLE_GUARD_WINDOW } from "../../src/vendor/mpr-plugins/team/team-down";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -126,7 +126,7 @@ members:
       logger: () => {},
     });
     expect(wakes.map((w) => w[1].wt)).toEqual(["mawjs-oracle"]);
-    expect(calls.filter((c) => c[0] === "kill-window")).toHaveLength(1);
+    expect(calls.filter((c) => c[0] === "kill-window" && !c.join(" ").includes(TEAM_LIFECYCLE_GUARD_WINDOW))).toHaveLength(1);
   });
 
   test("same-node channels member is wakeable with --channels and fresh wake passes channels", async () => {
@@ -244,7 +244,7 @@ members:
     ]);
     const wakes: any[] = [];
     await cmdTeamUp("alpha", { force: true }, { cwd: root, tmux, loadConfigFn: () => config, cmdWakeFn: async (...a: any[]) => { wakes.push(a); return "woke"; }, sleep: async () => {}, logger: () => {} });
-    expect(calls.filter((c) => c[0] === "kill-window")).toHaveLength(3);
+    expect(calls.filter((c) => c[0] === "kill-window" && !c.join(" ").includes(TEAM_LIFECYCLE_GUARD_WINDOW))).toHaveLength(3);
     expect(calls.some((c) => c.includes("omx-resume") || c.includes("claude48-resume") || c.includes("codex-resume"))).toBe(false);
     expect(wakes.map((w) => w[1].engine)).toEqual(["omx", "claude48", "codex"]);
   });
@@ -276,6 +276,41 @@ members:
       logger: () => {},
     });
     expect(wakes.map((w) => w[1].wt)).toEqual(["coder-1"]);
+  });
+
+
+  test("worktree:false lead adopts base oracle window and fresh wake avoids --wt double-prefix", async () => {
+    const root = tempRepo();
+    writeFileSync(join(root, ".maw", "teams", "lead.yaml"), `
+name: lead
+session: charter-session
+members:
+  - role: lead
+    name: mawjs-oracle
+    engine: claude
+    worktree: false
+`, "utf-8");
+
+    const live = fakeTmux(["charter-session|mawjs|claude|/repo|%1"]);
+    const adopted = await cmdTeamUp("lead", { status: true }, { cwd: root, tmux: live.tmux, repoSlug: "Soul-Brews-Studio/mawjs-oracle", loadConfigFn: () => config, logger: () => {} });
+    expect(adopted.roster.map((m) => [m.role, m.windowIdentity, m.state, m.pane?.windowName])).toEqual([["lead", "mawjs-oracle", "live", "mawjs"]]);
+
+    const missing = fakeTmux([]);
+    const status = await cmdTeamUp("lead", { status: true }, { cwd: root, tmux: missing.tmux, repoSlug: "Soul-Brews-Studio/mawjs-oracle", loadConfigFn: () => config, logger: () => {} });
+    expect(status.output).toContain("lead\tclaude\tmissing\twakeable mawjs-oracle -e claude --session charter-session");
+    expect(status.output).not.toContain("--wt mawjs-oracle");
+
+    expect(memberWakeTarget("Soul-Brews-Studio/mawjs-oracle", status.roster[0].member)).toBe("mawjs-oracle");
+    expect(memberWakeOptions(status.roster[0].member, { engine: "claude", session: "charter-session", repoPath: root })).toEqual({ engine: "claude", session: "charter-session", repoPath: root });
+  });
+
+  test("--session overrides current tmux session for headless/ssh-safe targeting", async () => {
+    const root = tempRepo();
+    const { tmux } = fakeTmux([]);
+    const result = await cmdTeamUp("alpha", { status: true, session: "01-mawjs" }, { cwd: root, tmux, loadConfigFn: () => config, logger: () => {} });
+    expect(result.session).toBe("01-mawjs");
+    expect(result.output).toContain("team up: alpha (01-mawjs)");
+    expect(result.warnings).toContain("current tmux session 'lead-session' differs from --session '01-mawjs'; targeting explicit session");
   });
 
   test("engine command resolves resume key only when requested", () => {
@@ -352,7 +387,7 @@ members:
     engine: claude48
     worktree: true
 `, "utf-8");
-    const { tmux } = fakeTmux([
+    const { tmux, calls } = fakeTmux([
       "charter-session|mawjs-oracle|claude|/repo|%1",
       "charter-session|mawjs-codex|codex|/wt/codex|%2",
       "charter-session|mawjs-coder-1|claude|/wt/coder-1|%3",
@@ -377,6 +412,7 @@ members:
       logger: () => {},
     });
     expect(doneCalls.map((c) => c[0])).toEqual(["mawjs-oracle", "mawjs-codex", "mawjs-coder-1"]);
+    expect(calls).toContainEqual(["new-window", "-d", "-t", "charter-session:", "-n", TEAM_LIFECYCLE_GUARD_WINDOW]);
   });
 });
 

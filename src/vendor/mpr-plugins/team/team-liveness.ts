@@ -17,6 +17,11 @@ export interface TeamPaneSnapshot {
   paneId: string;
 }
 
+export interface TeamSessionSnapshot {
+  name: string;
+  windows: string[];
+}
+
 export interface ClassifiedTeamMember {
   member: TeamCharterMember;
   role: string;
@@ -36,9 +41,30 @@ export interface ClassifyMemberOptions {
   engine?: string;
   currentNode?: string;
   only?: Set<string>;
+  repoSlug?: string;
 }
 
 const SHELL_RE = /^-?(zsh|bash|sh|fish)$/i;
+
+export function oracleStemFromRepoSlug(repoSlug: string): string {
+  return (repoSlug.split("/").pop() || repoSlug).replace(/-oracle$/i, "");
+}
+
+export function memberWakeTarget(repoSlug: string, member: TeamCharterMember): string {
+  if (member.worktree === false) return member.name?.trim() || oracleStemFromRepoSlug(repoSlug);
+  return repoSlug;
+}
+
+export function memberWakeOptions(member: TeamCharterMember, opts: WakeOptions & { engine: string; session: string; repoPath: string }): WakeOptions {
+  const base: WakeOptions = {
+    engine: opts.engine,
+    session: opts.session,
+    repoPath: opts.repoPath,
+    ...(member.channels === true ? { channels: true } : {}),
+  };
+  if (member.worktree === false) return base;
+  return { ...base, wt: memberWorktree(member) };
+}
 
 export function memberWindowIdentity(member: TeamCharterMember): string {
   return member.name?.trim() || member.role;
@@ -98,6 +124,29 @@ export async function currentTmuxSession(tmux: Pick<Tmux, "run"> = new Tmux()): 
   return (await tmux.run("display-message", "-p", "#S")).trim();
 }
 
+export async function listSessionSnapshots(tmux: Pick<Tmux, "run"> = new Tmux()): Promise<TeamSessionSnapshot[]> {
+  const raw = await tmux.run("list-windows", "-a", "-F", "#{session_name}|#{window_name}");
+  const sessions = new Map<string, string[]>();
+  for (const line of raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)) {
+    const [name = "", window = ""] = line.split("|");
+    if (!name) continue;
+    const windows = sessions.get(name) ?? [];
+    if (window) windows.push(window);
+    sessions.set(name, windows);
+  }
+  return [...sessions.entries()].map(([name, windows]) => ({ name, windows }));
+}
+
+export function memberWindowCandidates(member: TeamCharterMember, repoSlug = ""): string[] {
+  const identity = memberWindowIdentity(member);
+  const candidates = [identity];
+  if (member.worktree === false) {
+    const stem = oracleStemFromRepoSlug(repoSlug || identity);
+    candidates.push(stem, `${stem}-oracle`, identity.replace(/-oracle$/i, ""));
+  }
+  return [...new Set(candidates.filter(Boolean))];
+}
+
 export function classifyMember(
   member: TeamCharterMember,
   panes: TeamPaneSnapshot[],
@@ -116,9 +165,10 @@ export function classifyMember(
     return { member, role, engine, worktree, windowIdentity, state: "skipped", skipReason: "outside --only" };
   }
 
-  const suffix = new RegExp(`-${escapeRegex(windowIdentity)}$`);
+  const candidates = memberWindowCandidates(member, opts.repoSlug);
+  const suffixes = candidates.map((candidate) => new RegExp(`-${escapeRegex(candidate)}$`));
   const pane = panes.find((candidate) =>
-    candidate.sessionName === session && (candidate.windowName === windowIdentity || suffix.test(candidate.windowName))
+    candidate.sessionName === session && (candidates.includes(candidate.windowName) || suffixes.some((suffix) => suffix.test(candidate.windowName)))
   );
   if (!pane) return { member, role, engine, worktree, windowIdentity, state: "missing" };
   if (SHELL_RE.test(pane.command)) return { member, role, engine, worktree, windowIdentity, state: "dead", pane };
@@ -153,11 +203,5 @@ export async function wakeMember(
   deps: WakeMemberDeps = {},
 ): Promise<string> {
   const wake = deps.cmdWakeFn ?? cmdWake;
-  return wake(repoSlug, {
-    wt: memberWorktree(member),
-    engine: opts.engine,
-    session: opts.session,
-    repoPath: opts.repoPath,
-    ...(member.channels === true ? { channels: true } : {}),
-  });
+  return wake(memberWakeTarget(repoSlug, member), memberWakeOptions(member, opts));
 }
