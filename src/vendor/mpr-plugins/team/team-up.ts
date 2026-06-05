@@ -7,6 +7,7 @@ import { loadConfig } from "../../../config/load";
 import type { MawConfig } from "../../../config/types";
 import { Tmux } from "../../../core/transport/tmux";
 import { cmdWake } from "../../../commands/shared/wake-cmd";
+import { TEAM_LIFECYCLE_GUARD_WINDOW } from "./team-down";
 import {
   classifyMember,
   currentTmuxSession,
@@ -15,6 +16,7 @@ import {
   listPaneSnapshots,
   repoSlugFromRoot,
   resolveCharterPath,
+  memberWakeTarget,
   wakeMember,
   type ClassifiedTeamMember,
 } from "./team-liveness";
@@ -26,6 +28,7 @@ export interface TeamUpOptions {
   gather?: boolean;
   engine?: string;
   only?: string[];
+  session?: string;
 }
 
 export interface TeamUpAction {
@@ -73,14 +76,15 @@ function renderRoster(team: string, session: string, roster: ClassifiedTeamMembe
 }
 
 async function waitForNonShell(
-  role: string,
+  member: TeamCharter["members"][number],
   session: string,
   tmux: Pick<Tmux, "run">,
   sleep: (ms: number) => Promise<void>,
+  repoSlug: string,
 ): Promise<void> {
   for (let i = 0; i < 10; i++) {
     const panes = await listPaneSnapshots(tmux);
-    const current = classifyMember({ role }, panes, session);
+    const current = classifyMember(member, panes, session, { repoSlug });
     if (current.pane && !SHELL_RE.test(current.pane.command)) return;
     await sleep(1000);
   }
@@ -96,6 +100,20 @@ function warnOnPathCollisions(roster: ClassifiedTeamMember[], warnings: string[]
   }
 }
 
+function wakePlan(item: ClassifiedTeamMember, repoSlug: string, session: string): string {
+  if (item.member.worktree === false) {
+    return `wakeable ${memberWakeTarget(repoSlug, item.member)} -e ${item.engine} --session ${session}${item.member.channels ? " --channels" : ""}`;
+  }
+  return `wakeable --wt ${item.worktree} -e ${item.engine} --session ${session}${item.member.channels ? " --channels" : ""}`;
+}
+
+function freshWakePlan(item: ClassifiedTeamMember, repoSlug: string, session: string, prefix = "would fresh wake"): string {
+  if (item.member.worktree === false) {
+    return `${prefix} ${memberWakeTarget(repoSlug, item.member)} -e ${item.engine} --session ${session}${item.member.channels ? " --channels" : ""}`;
+  }
+  return `${prefix} --wt ${item.worktree} -e ${item.engine} --session ${session}${item.member.channels ? " --channels" : ""}`;
+}
+
 export async function cmdTeamUp(team: string, opts: TeamUpOptions = {}, deps: TeamUpDeps = {}): Promise<TeamUpResult> {
   const cwd = deps.cwd ?? process.cwd();
   const charterPath = deps.charterPath !== undefined ? deps.charterPath : resolveCharterPath(team, cwd);
@@ -108,21 +126,24 @@ export async function cmdTeamUp(team: string, opts: TeamUpOptions = {}, deps: Te
   const repoRoot = deps.repoRoot ?? findRepoRoot(cwd);
   const repoSlug = deps.repoSlug ?? repoSlugFromRoot(repoRoot);
   const currentSession = await currentTmuxSession(tmux).catch(() => "");
-  const session = charter.session ?? currentSession;
+  const session = opts.session?.trim() || charter.session || currentSession;
+  if (!session) throw new Error(`session required: pass --session <name> when running team up outside tmux and charter.session is omitted`);
   const warnings: string[] = [];
-  if (charter.session && currentSession && charter.session !== currentSession) {
+  if (opts.session && currentSession && opts.session !== currentSession) {
+    warnings.push(`current tmux session '${currentSession}' differs from --session '${opts.session}'; targeting explicit session`);
+  } else if (charter.session && currentSession && charter.session !== currentSession) {
     warnings.push(`current tmux session '${currentSession}' differs from charter.session '${charter.session}'; targeting charter session`);
   }
 
   const panes = await listPaneSnapshots(tmux);
   const only = opts.only?.length ? new Set(opts.only.map((item) => item.trim()).filter(Boolean)) : undefined;
-  const roster = charter.members.map((member) => classifyMember(member, panes, session, { engine: opts.engine, currentNode: config.node, only }));
+  const roster = charter.members.map((member) => classifyMember(member, panes, session, { engine: opts.engine, currentNode: config.node, only, repoSlug }));
   const actions: TeamUpAction[] = [];
 
   if (opts.status) {
     for (const item of roster) {
       if (item.state === "skipped") actions.push({ role: item.role, state: item.state, action: `skip (${item.skipReason ?? "guard"})` });
-      else if (item.state === "missing") actions.push({ role: item.role, state: item.state, action: `wakeable --wt ${item.worktree} -e ${item.engine} --session ${session}${item.member.channels ? " --channels" : ""}` });
+      else if (item.state === "missing") actions.push({ role: item.role, state: item.state, action: wakePlan(item, repoSlug, session) });
       else if (item.state === "dead") actions.push({ role: item.role, state: item.state, action: "wakeable resume in place" });
       else actions.push({ role: item.role, state: item.state, action: "skip live" });
     }
@@ -138,7 +159,7 @@ export async function cmdTeamUp(team: string, opts: TeamUpOptions = {}, deps: Te
         actions.push({ role: item.role, state: item.state, action: `skip (${item.skipReason ?? "guard"})` });
       } else if (opts.force) {
         const command = engineCommand(item.engine, { resume: false }, config);
-        actions.push({ role: item.role, state: item.state, action: `would force fresh wake --wt ${item.worktree} -e ${item.engine} --session ${session}${item.member.channels ? " --channels" : ""}`, command });
+        actions.push({ role: item.role, state: item.state, action: freshWakePlan(item, repoSlug, session, "would force fresh wake"), command });
       } else if (item.state === "live") {
         actions.push({ role: item.role, state: item.state, action: "skip live" });
       } else if (item.state === "dead") {
@@ -146,7 +167,7 @@ export async function cmdTeamUp(team: string, opts: TeamUpOptions = {}, deps: Te
         actions.push({ role: item.role, state: item.state, action: "would relaunch in place with resume", command });
       } else {
         const command = engineCommand(item.engine, { resume: false }, config);
-        actions.push({ role: item.role, state: item.state, action: `would fresh wake --wt ${item.worktree} -e ${item.engine} --session ${session}${item.member.channels ? " --channels" : ""}`, command });
+        actions.push({ role: item.role, state: item.state, action: freshWakePlan(item, repoSlug, session), command });
       }
     }
     warnOnPathCollisions(roster, warnings);
@@ -164,24 +185,24 @@ export async function cmdTeamUp(team: string, opts: TeamUpOptions = {}, deps: Te
       const command = engineCommand(item.engine, { resume: false }, config);
       await wakeMember(repoSlug, item.member, { engine: item.engine, session, repoPath: repoRoot }, { cmdWakeFn: deps.cmdWakeFn });
       actions.push({ role: item.role, state: item.state, action: "force fresh wake", command });
-      await waitForNonShell(item.role, session, tmux, sleep);
+      await waitForNonShell(item.member, session, tmux, sleep, repoSlug);
     } else if (item.state === "live") {
       actions.push({ role: item.role, state: item.state, action: "skip live" });
     } else if (item.state === "dead") {
       const command = engineCommand(item.engine, { resume: true }, config);
       await tmux.run("send-keys", "-t", item.pane!.paneId, command, "Enter");
       actions.push({ role: item.role, state: item.state, action: "resume in place", command });
-      await waitForNonShell(item.role, session, tmux, sleep);
+      await waitForNonShell(item.member, session, tmux, sleep, repoSlug);
     } else {
       const command = engineCommand(item.engine, { resume: false }, config);
       await wakeMember(repoSlug, item.member, { engine: item.engine, session, repoPath: repoRoot }, { cmdWakeFn: deps.cmdWakeFn });
       actions.push({ role: item.role, state: item.state, action: "fresh wake", command });
-      await waitForNonShell(item.role, session, tmux, sleep);
+      await waitForNonShell(item.member, session, tmux, sleep, repoSlug);
     }
   }
 
   const finalPanes = await listPaneSnapshots(tmux).catch(() => panes);
-  const finalRoster = charter.members.map((member) => classifyMember(member, finalPanes, session, { engine: opts.engine, currentNode: config.node, only }));
+  const finalRoster = charter.members.map((member) => classifyMember(member, finalPanes, session, { engine: opts.engine, currentNode: config.node, only, repoSlug }));
   warnOnPathCollisions(finalRoster, warnings);
 
   if (opts.gather) {
@@ -190,6 +211,10 @@ export async function cmdTeamUp(team: string, opts: TeamUpOptions = {}, deps: Te
     }
     await tmux.run("select-layout", "main-vertical");
     actions.push({ role: "*", state: "live", action: "gather main-vertical" });
+  }
+
+  if (!opts.status && !opts.dryRun && finalRoster.some((item) => item.state === "live")) {
+    await tmux.run("kill-window", "-t", `${session}:${TEAM_LIFECYCLE_GUARD_WINDOW}`).catch(() => undefined);
   }
 
   const output = renderRoster(team, session, finalRoster, actions, warnings);

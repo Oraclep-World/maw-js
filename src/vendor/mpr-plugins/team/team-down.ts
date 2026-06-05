@@ -12,6 +12,8 @@ import {
   type ClassifiedTeamMember,
 } from "./team-liveness";
 
+export const TEAM_LIFECYCLE_GUARD_WINDOW = "maw-team-lifecycle-guard";
+
 export interface TeamDownOptions {
   all?: boolean;
   keep?: string[];
@@ -82,6 +84,23 @@ export async function cmdTeamDown(team: string, opts: TeamDownOptions = {}, deps
   const keep = opts.keep ?? [];
   const actions: TeamDownAction[] = [];
   let done = deps.cmdDoneFn;
+
+  const killableLive = roster.filter((item) => {
+    const reason = keepReason(item, keep, Boolean(opts.all));
+    return !reason && item.state === "live";
+  });
+  const sessionWindows = new Set(
+    panes
+      .filter((pane) => pane.sessionName === session)
+      .map((pane) => pane.windowName)
+      .filter((name) => name !== TEAM_LIFECYCLE_GUARD_WINDOW),
+  );
+  const killWindows = new Set(killableLive.map((item) => item.pane?.windowName ?? item.windowIdentity));
+  const wouldKillLastTeamWindow = sessionWindows.size > 0 && [...sessionWindows].every((window) => killWindows.has(window));
+  if (!opts.status && !opts.dryRun && wouldKillLastTeamWindow) {
+    await tmux.run("new-window", "-d", "-t", `${session}:`, "-n", TEAM_LIFECYCLE_GUARD_WINDOW);
+    actions.push({ role: "session", state: "guard", action: `created ${TEAM_LIFECYCLE_GUARD_WINDOW}` });
+  }
 
   for (const item of roster) {
     const reason = keepReason(item, keep, Boolean(opts.all));

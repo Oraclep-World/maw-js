@@ -861,13 +861,15 @@ export async function cmdWake(oracle: string, opts: WakeOptions): Promise<string
   }
 
   const foreignSession = requestedForeignSession;
-  let session = foreignSession || preResolvedSession || await detectSession(oracle, opts.urlRepoName);
+  let session = foreignSession ? "" : (preResolvedSession || await detectSession(oracle, opts.urlRepoName));
   if (foreignSession) {
     const exists = opts.dryRun || await tmux.hasSession(foreignSession);
-    if (!exists) {
-      throw new Error(`target session '${foreignSession}' not found — run: maw new ${foreignSession}`);
+    if (exists) {
+      session = foreignSession;
+      console.log(`\x1b[36m→\x1b[0m target workspace session: ${foreignSession}`);
+    } else {
+      console.log(`\x1b[36m→\x1b[0m target workspace session missing, creating: ${foreignSession}`);
     }
-    console.log(`\x1b[36m→\x1b[0m target workspace session: ${foreignSession}`);
   } else if (session) console.log(`\x1b[36m→\x1b[0m session exists: ${session}`);
   else console.log(`\x1b[36m→\x1b[0m no session found, creating...`);
 
@@ -891,12 +893,13 @@ export async function cmdWake(oracle: string, opts: WakeOptions): Promise<string
   });
 
   const mainWindowName = foreignSession ? oracle : `${oracle}-oracle`;
+  const shouldCreateSession = !session && (wakeDecision.wake || Boolean(foreignSession));
 
   if (opts.dryRun) {
     console.log(`\x1b[90mdry-run — no tmux sessions/windows will be changed\x1b[0m`);
     if (foreignSession) {
       console.log(`\x1b[32m+\x1b[0m would wake window '${mainWindowName}' in workspace session '${foreignSession}'`);
-    } else if (!session && wakeDecision.wake) {
+    } else if (shouldCreateSession) {
       const plannedSession = await chooseWakeSessionName(oracle, opts.urlRepoName);
       console.log(`\x1b[32m+\x1b[0m would create session '${plannedSession}' (main: ${mainWindowName})`);
     } else if (session) {
@@ -942,7 +945,7 @@ export async function cmdWake(oracle: string, opts: WakeOptions): Promise<string
   let knownWindows = new Set<string>();
   let knownWindowsReliable = true;
 
-  if (!session && wakeDecision.wake) {
+  if (shouldCreateSession) {
     // #2 — refuse to spawn a brand-new session/agent once the fleet is at the
     // configured concurrency cap (no-op when limits.maxConcurrentAgents is 0).
     await assertAgentCapacity(oracle);
@@ -950,7 +953,7 @@ export async function cmdWake(oracle: string, opts: WakeOptions): Promise<string
     // #769 — URL input names the new session after the full repo (e.g.
     // "m5-oracle") so it's distinct from any unrelated sub-token sessions
     // and immediately disambiguates future `maw wake` calls.
-    session = await chooseWakeSessionName(oracle, opts.urlRepoName);
+    session = foreignSession || await chooseWakeSessionName(oracle, opts.urlRepoName);
     await tmux.newSession(session, { window: mainWindowName, cwd: repoPath });
     await retryFreshSessionTmuxStep(session, "set session environment", () => setSessionEnv(session), {
       hasSession: tmux.hasSession,

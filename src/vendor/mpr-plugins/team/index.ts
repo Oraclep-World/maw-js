@@ -372,7 +372,7 @@ export default async function handler(ctx: InvokeContext): Promise<InvokeResult>
       // #1976 — charter-driven team wake: reconcile the charter against live
       // panes (skip live, resume dead in place, fresh-wake missing).
       if (!args[1]) {
-        logs.push("usage: maw team up <team> [--only <a,b>] [--dry-run] [--status] [--force] [--gather] [-e <engine>]");
+        logs.push("usage: maw team up <team> [--session <name>] [--only <a,b>] [--dry-run] [--status] [--force] [--gather] [-e <engine>]");
         return { ok: false, error: "team required", output: logs.join("\n") };
       }
       const { cmdTeamUp } = await import("./team-up");
@@ -384,6 +384,7 @@ export default async function handler(ctx: InvokeContext): Promise<InvokeResult>
         "--engine": String,
         "-e": "--engine",
         "--only": String,
+        "--session": String,
       }, 2);
       await cmdTeamUp(args[1], {
         dryRun: Boolean(flags["--dry-run"]),
@@ -392,6 +393,7 @@ export default async function handler(ctx: InvokeContext): Promise<InvokeResult>
         gather: Boolean(flags["--gather"]),
         engine: flags["--engine"] as string | undefined,
         only: String(flags["--only"] || "").split(",").map((s) => s.trim()).filter(Boolean),
+        session: flags["--session"] as string | undefined,
       });
 
     } else {

@@ -1219,10 +1219,18 @@ describe("cmdWake main-suite coverage", () => {
     await expect(captureLogs(() => cmdWake("mawjs", { bud: true }))).rejects.toThrow("--bud requires --task <slug> or --wt <slug>");
     await expect(captureLogs(() => cmdWake("mawjs", { signalOnBirth: true }))).rejects.toThrow("--signal-on-birth requires --bud");
     await expect(captureLogs(() => cmdWake("mawjs", { session: "bad/session" }))).rejects.toThrow("invalid target session 'bad/session'");
+    expect(newSessionCalls).toEqual([]);
+    expect(newWindowCalls).toEqual([]);
+  });
+
+  test("creates missing explicit workspace sessions for lifecycle reconcile", async () => {
     sessions = [];
     hasSessions = new Set();
-    await expect(captureLogs(() => cmdWake("mawjs", { session: "project" }))).rejects.toThrow("target session 'project' not found");
-    expect(newSessionCalls).toEqual([]);
+    const { result, logs } = await captureLogs(() => cmdWake("mawjs", { session: "project", noRehydrate: true }));
+
+    expect(result).toBe("project:mawjs");
+    expect(logs.join("\n")).toContain("target workspace session missing, creating: project");
+    expect(newSessionCalls).toEqual([{ name: "project", opts: { window: "mawjs", cwd: repoPath } }]);
     expect(newWindowCalls).toEqual([]);
   });
 
@@ -1343,6 +1351,41 @@ describe("cmdWake main-suite coverage", () => {
       text: `cd ${repoPath} && codex --agent mawjs-oracle`,
     });
     expect(attachCalls).toEqual(["63-mawjs"]);
+  });
+
+  test("#2005 --session into a MISSING workspace session creates it (no adhoc 'maw new')", async () => {
+    // Regression for the team down --all → up cycle: a destroyed target session
+    // must be re-created by wake, not error with "run: maw new <session>".
+    shouldWakeDecision = { wake: true, reason: "missing" };
+    hasSessions = new Set(["54-mawjs"]); // target "01-mawjs" absent
+    newSessionVisibleToHasSession = true;
+    windowsBySession = {};
+
+    const { result, logs } = await captureLogs(() =>
+      cmdWake("mawjs", { session: "01-mawjs", engine: "codex", noRehydrate: true }),
+    );
+
+    expect(result).toBe("01-mawjs:mawjs");
+    expect(newSessionCalls).toEqual([
+      { name: "01-mawjs", opts: { window: "mawjs", cwd: repoPath } },
+    ]);
+    const rendered = logs.join("\n");
+    expect(rendered).toContain("target workspace session missing, creating: 01-mawjs");
+    expect(rendered).not.toContain("maw new");
+  });
+
+  test("#2005 --session into an EXISTING workspace session reuses it (no newSession)", async () => {
+    shouldWakeDecision = { wake: true, reason: "missing" };
+    hasSessions = new Set(["54-mawjs", "01-mawjs"]); // target already present
+    windowsBySession = { "01-mawjs": [] };
+
+    const { result, logs } = await captureLogs(() =>
+      cmdWake("mawjs", { session: "01-mawjs", engine: "codex", noRehydrate: true }),
+    );
+
+    expect(result).toBe("01-mawjs:mawjs");
+    expect(newSessionCalls).toEqual([]); // reused, not recreated
+    expect(logs.join("\n")).toContain("target workspace session: 01-mawjs");
   });
 
   test("restores requested snapshot windows, rehydrates missing worktrees, and relaunches a dead existing agent", async () => {

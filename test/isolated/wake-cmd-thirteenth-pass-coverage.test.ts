@@ -479,8 +479,10 @@ describe("wake-cmd thirteenth-pass isolated coverage", () => {
       .rejects.toThrow("invalid target session 'bad/session'");
 
     hasSessionReturn = false;
-    await expect(captureLogs(() => cmdWake("neo", { repoPath, session: "missing" })))
-      .rejects.toThrow("target session 'missing' not found");
+    const created = await captureLogs(() => cmdWake("neo", { repoPath, session: "missing", noRehydrate: true }));
+    expect(created).toBe("missing:neo");
+    expect(newSessions).toContainEqual({ session: "missing", opts: { window: "neo", cwd: repoPath } });
+    expect(plain()).toContain("target workspace session missing, creating: missing");
   });
 
   test("dry-run snapshot planning reports empty and concrete restore windows", async () => {
