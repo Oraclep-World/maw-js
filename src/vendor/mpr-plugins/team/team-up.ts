@@ -25,6 +25,7 @@ export interface TeamUpOptions {
   status?: boolean;
   gather?: boolean;
   engine?: string;
+  only?: string[];
 }
 
 export interface TeamUpAction {
@@ -58,44 +59,6 @@ export interface TeamUpDeps {
 
 const DEFAULT_SLEEP = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 const SHELL_RE = /^-?(zsh|bash|sh|fish)$/i;
-
-function memberWindowIdentity(member: TeamCharter["members"][number]): string {
-  return member.name?.trim() || member.role;
-}
-
-function memberEngine(member: TeamCharter["members"][number], override?: string): string {
-  return override ?? member.engine ?? member.model ?? "claude";
-}
-
-function memberWorktree(member: TeamCharter["members"][number]): string {
-  const identity = memberWindowIdentity(member);
-  return typeof member.worktree === "string" && member.worktree.trim() ? member.worktree.trim() : identity;
-}
-
-function isOtherNodeMember(member: TeamCharter["members"][number], currentNode?: string): boolean {
-  return Boolean(member.node && member.node !== currentNode);
-}
-
-function classifyRosterMember(
-  member: TeamCharter["members"][number],
-  panes: Parameters<typeof classifyMember>[1],
-  session: string,
-  opts: { engine?: string; currentNode?: string } = {},
-): ClassifiedTeamMember {
-  if (isOtherNodeMember(member, opts.currentNode)) {
-    const role = member.role;
-    return {
-      member,
-      role,
-      engine: memberEngine(member, opts.engine),
-      worktree: memberWorktree(member),
-      windowIdentity: memberWindowIdentity(member),
-      state: "skipped",
-      skipReason: `other node: ${member.node}`,
-    };
-  }
-  return classifyMember(member, panes, session, { engine: opts.engine });
-}
 
 function renderRoster(team: string, session: string, roster: ClassifiedTeamMember[], actions: TeamUpAction[], warnings: string[], tail?: string): string {
   const actionByRole = new Map(actions.map((action) => [action.role, action]));
@@ -152,7 +115,8 @@ export async function cmdTeamUp(team: string, opts: TeamUpOptions = {}, deps: Te
   }
 
   const panes = await listPaneSnapshots(tmux);
-  const roster = charter.members.map((member) => classifyRosterMember(member, panes, session, { engine: opts.engine, currentNode: config.node }));
+  const only = opts.only?.length ? new Set(opts.only.map((item) => item.trim()).filter(Boolean)) : undefined;
+  const roster = charter.members.map((member) => classifyMember(member, panes, session, { engine: opts.engine, currentNode: config.node, only }));
   const actions: TeamUpAction[] = [];
 
   if (opts.status) {
@@ -217,7 +181,7 @@ export async function cmdTeamUp(team: string, opts: TeamUpOptions = {}, deps: Te
   }
 
   const finalPanes = await listPaneSnapshots(tmux).catch(() => panes);
-  const finalRoster = charter.members.map((member) => classifyRosterMember(member, finalPanes, session, { engine: opts.engine, currentNode: config.node }));
+  const finalRoster = charter.members.map((member) => classifyMember(member, finalPanes, session, { engine: opts.engine, currentNode: config.node, only }));
   warnOnPathCollisions(finalRoster, warnings);
 
   if (opts.gather) {

@@ -197,7 +197,7 @@ export default async function handler(ctx: InvokeContext): Promise<InvokeResult>
         return { ok: false, error: "agent name required", output: logs.join("\n") };
       }
       cmdTeamLives(args[1]);
-    } else if (sub === "shutdown" || sub === "down") {
+    } else if (sub === "shutdown") {
       if (!args[1]) {
         logs.push("usage: maw team shutdown <name> [--force] [--merge]");
         return { ok: false, error: "name required", output: logs.join("\n") };
@@ -347,11 +347,32 @@ export default async function handler(ctx: InvokeContext): Promise<InvokeResult>
         console.log(`\x1b[36m↵\x1b[0m enter sent to ${m.agentId || m.name}`);
       }
 
+    } else if (sub === "down") {
+      // #2002 — charter-driven team teardown: keep lead by default, done live workers.
+      if (!args[1]) {
+        logs.push("usage: maw team down <team> [--all] [--keep <a,b>] [--dry-run] [--status]");
+        return { ok: false, error: "team required", output: logs.join("\n") };
+      }
+      const { cmdTeamDown } = await import("./team-down");
+      const flags = parseFlags(args, {
+        "--all": Boolean,
+        "--keep": String,
+        "--dry-run": Boolean,
+        "--status": Boolean,
+      }, 2);
+      const keep = String(flags["--keep"] || "").split(",").map((s) => s.trim()).filter(Boolean);
+      await cmdTeamDown(args[1], {
+        all: Boolean(flags["--all"]),
+        keep,
+        dryRun: Boolean(flags["--dry-run"]),
+        status: Boolean(flags["--status"]),
+      });
+
     } else if (sub === "up") {
       // #1976 — charter-driven team wake: reconcile the charter against live
       // panes (skip live, resume dead in place, fresh-wake missing).
       if (!args[1]) {
-        logs.push("usage: maw team up <team> [--dry-run] [--status] [--force] [--gather] [-e <engine>]");
+        logs.push("usage: maw team up <team> [--only <a,b>] [--dry-run] [--status] [--force] [--gather] [-e <engine>]");
         return { ok: false, error: "team required", output: logs.join("\n") };
       }
       const { cmdTeamUp } = await import("./team-up");
@@ -362,6 +383,7 @@ export default async function handler(ctx: InvokeContext): Promise<InvokeResult>
         "--gather": Boolean,
         "--engine": String,
         "-e": "--engine",
+        "--only": String,
       }, 2);
       await cmdTeamUp(args[1], {
         dryRun: Boolean(flags["--dry-run"]),
@@ -369,11 +391,12 @@ export default async function handler(ctx: InvokeContext): Promise<InvokeResult>
         force: Boolean(flags["--force"]),
         gather: Boolean(flags["--gather"]),
         engine: flags["--engine"] as string | undefined,
+        only: String(flags["--only"] || "").split(",").map((s) => s.trim()).filter(Boolean),
       });
 
     } else {
       logs.push(`unknown team subcommand: ${sub}`);
-      logs.push("usage: maw team <create|plan|preflight|load|up|spawn-from|spawn|bring|send|shutdown|resume|lives|list|status|add|tasks|done|assign|delete|invite|oracle-invite|oracle-remove|members|enter>");
+      logs.push("usage: maw team <create|plan|preflight|load|up|down|spawn-from|spawn|bring|send|shutdown|resume|lives|list|status|add|tasks|done|assign|delete|invite|oracle-invite|oracle-remove|members|enter>");
       return { ok: false, error: `unknown subcommand: ${sub}`, output: logs.join("\n") };
     }
 

@@ -10,6 +10,7 @@ import { tmpdir } from "os";
 import { parseTeamCharterText } from "../../src/vendor/mpr-plugins/team/team-charter";
 import { classifyMember, engineCommand } from "../../src/vendor/mpr-plugins/team/team-liveness";
 import { cmdTeamUp } from "../../src/vendor/mpr-plugins/team/team-up";
+import { cmdTeamDown } from "../../src/vendor/mpr-plugins/team/team-down";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -248,9 +249,134 @@ members:
     expect(wakes.map((w) => w[1].engine)).toEqual(["omx", "claude48", "codex"]);
   });
 
+
+  test("--only skips members outside the selected role/name/worktree set", async () => {
+    const root = tempRepo();
+    const { tmux } = fakeTmux([]);
+    const wakes: any[] = [];
+
+    const status = await cmdTeamUp("alpha", { status: true, only: ["coder-1"] }, {
+      cwd: root,
+      tmux,
+      loadConfigFn: () => config,
+      logger: () => {},
+    });
+    expect(status.roster.map((m) => [m.role, m.state, m.skipReason])).toEqual([
+      ["coder-1", "missing", undefined],
+      ["coder-10", "skipped", "outside --only"],
+      ["oracle", "skipped", "outside --only"],
+    ]);
+
+    await cmdTeamUp("alpha", { only: ["coder-1"] }, {
+      cwd: root,
+      tmux,
+      loadConfigFn: () => config,
+      cmdWakeFn: async (...a: any[]) => { wakes.push(a); return "woke"; },
+      sleep: async () => {},
+      logger: () => {},
+    });
+    expect(wakes.map((w) => w[1].wt)).toEqual(["coder-1"]);
+  });
+
   test("engine command resolves resume key only when requested", () => {
     expect(engineCommand("omx", {}, config)).toBe("maw run omx");
     expect(engineCommand("omx", { resume: true }, config)).toBe("maw run omx-resume");
+  });
+});
+
+describe("maw team down (#2002)", () => {
+  test("status keeps lead, plans maw done for live workers, and skips off-node members", async () => {
+    const root = tempRepo();
+    writeFileSync(join(root, ".maw", "teams", "down.yaml"), `
+name: down
+session: charter-session
+members:
+  - role: lead
+    name: mawjs-oracle
+    engine: claude
+    worktree: false
+  - role: implementer
+    name: codex
+    engine: omx
+    worktree: true
+  - role: reviewer
+    name: coder-1
+    engine: claude48
+    worktree: true
+  - role: bridge
+    name: oss-world
+    engine: claude
+    node: oracle-world
+    worktree: true
+`, "utf-8");
+    const { tmux } = fakeTmux([
+      "charter-session|mawjs-oracle|claude|/repo|%1",
+      "charter-session|mawjs-codex|codex|/wt/codex|%2",
+      "charter-session|mawjs-coder-1|claude|/wt/coder-1|%3",
+    ]);
+    const doneCalls: any[] = [];
+
+    const result = await cmdTeamDown("down", { status: true }, {
+      cwd: root,
+      tmux,
+      loadConfigFn: () => ({ ...config, node: "m5" }),
+      cmdDoneFn: async (...a: any[]) => { doneCalls.push(a); },
+      logger: () => {},
+    });
+
+    expect(result.actions.map((a) => [a.role, a.action, a.target])).toEqual([
+      ["lead", "keep (lead)", undefined],
+      ["implementer", "would maw done mawjs-codex", "mawjs-codex"],
+      ["reviewer", "would maw done mawjs-coder-1", "mawjs-coder-1"],
+      ["bridge", "keep (other node: oracle-world)", undefined],
+    ]);
+    expect(doneCalls).toHaveLength(0);
+  });
+
+  test("down executes done for selected live workers, supports --keep and --all", async () => {
+    const root = tempRepo();
+    writeFileSync(join(root, ".maw", "teams", "down.yaml"), `
+name: down
+session: charter-session
+members:
+  - role: lead
+    name: mawjs-oracle
+    engine: claude
+    worktree: false
+  - role: implementer
+    name: codex
+    engine: omx
+    worktree: true
+  - role: reviewer
+    name: coder-1
+    engine: claude48
+    worktree: true
+`, "utf-8");
+    const { tmux } = fakeTmux([
+      "charter-session|mawjs-oracle|claude|/repo|%1",
+      "charter-session|mawjs-codex|codex|/wt/codex|%2",
+      "charter-session|mawjs-coder-1|claude|/wt/coder-1|%3",
+    ]);
+    const doneCalls: any[] = [];
+
+    await cmdTeamDown("down", { keep: ["coder-1"] }, {
+      cwd: root,
+      tmux,
+      loadConfigFn: () => config,
+      cmdDoneFn: async (...a: any[]) => { doneCalls.push(a); },
+      logger: () => {},
+    });
+    expect(doneCalls).toEqual([["mawjs-codex", { sessionName: "charter-session" }]]);
+
+    doneCalls.length = 0;
+    await cmdTeamDown("down", { all: true }, {
+      cwd: root,
+      tmux,
+      loadConfigFn: () => config,
+      cmdDoneFn: async (...a: any[]) => { doneCalls.push(a); },
+      logger: () => {},
+    });
+    expect(doneCalls.map((c) => c[0])).toEqual(["mawjs-oracle", "mawjs-codex", "mawjs-coder-1"]);
   });
 });
 
@@ -269,6 +395,12 @@ describe("vendored team plugin routes `up` (#1976 integration)", () => {
 
   test("`team up` is a known subcommand", async () => {
     const { res } = await dispatch(["up"]);
+    expect(res.error).not.toContain("unknown subcommand");
+    expect(res.error).toBe("team required");
+  });
+
+  test("`team down` is a known subcommand", async () => {
+    const { res } = await dispatch(["down"]);
     expect(res.error).not.toContain("unknown subcommand");
     expect(res.error).toBe("team required");
   });
