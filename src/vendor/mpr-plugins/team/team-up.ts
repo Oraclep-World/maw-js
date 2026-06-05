@@ -59,6 +59,44 @@ export interface TeamUpDeps {
 const DEFAULT_SLEEP = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 const SHELL_RE = /^-?(zsh|bash|sh|fish)$/i;
 
+function memberWindowIdentity(member: TeamCharter["members"][number]): string {
+  return member.name?.trim() || member.role;
+}
+
+function memberEngine(member: TeamCharter["members"][number], override?: string): string {
+  return override ?? member.engine ?? member.model ?? "claude";
+}
+
+function memberWorktree(member: TeamCharter["members"][number]): string {
+  const identity = memberWindowIdentity(member);
+  return typeof member.worktree === "string" && member.worktree.trim() ? member.worktree.trim() : identity;
+}
+
+function isOtherNodeMember(member: TeamCharter["members"][number], currentNode?: string): boolean {
+  return Boolean(member.node && member.node !== currentNode);
+}
+
+function classifyRosterMember(
+  member: TeamCharter["members"][number],
+  panes: Parameters<typeof classifyMember>[1],
+  session: string,
+  opts: { engine?: string; currentNode?: string } = {},
+): ClassifiedTeamMember {
+  if (isOtherNodeMember(member, opts.currentNode)) {
+    const role = member.role;
+    return {
+      member,
+      role,
+      engine: memberEngine(member, opts.engine),
+      worktree: memberWorktree(member),
+      windowIdentity: memberWindowIdentity(member),
+      state: "skipped",
+      skipReason: `other node: ${member.node}`,
+    };
+  }
+  return classifyMember(member, panes, session, { engine: opts.engine });
+}
+
 function renderRoster(team: string, session: string, roster: ClassifiedTeamMember[], actions: TeamUpAction[], warnings: string[], tail?: string): string {
   const actionByRole = new Map(actions.map((action) => [action.role, action]));
   const lines = [`team up: ${team} (${session})`, "role\tengine\tstate\taction"];
@@ -114,10 +152,16 @@ export async function cmdTeamUp(team: string, opts: TeamUpOptions = {}, deps: Te
   }
 
   const panes = await listPaneSnapshots(tmux);
-  const roster = charter.members.map((member) => classifyMember(member, panes, session, { engine: opts.engine }));
+  const roster = charter.members.map((member) => classifyRosterMember(member, panes, session, { engine: opts.engine, currentNode: config.node }));
   const actions: TeamUpAction[] = [];
 
   if (opts.status) {
+    for (const item of roster) {
+      if (item.state === "skipped") actions.push({ role: item.role, state: item.state, action: `skip (${item.skipReason ?? "guard"})` });
+      else if (item.state === "missing") actions.push({ role: item.role, state: item.state, action: `wakeable --wt ${item.worktree} -e ${item.engine} --session ${session}${item.member.channels ? " --channels" : ""}` });
+      else if (item.state === "dead") actions.push({ role: item.role, state: item.state, action: "wakeable resume in place" });
+      else actions.push({ role: item.role, state: item.state, action: "skip live" });
+    }
     warnOnPathCollisions(roster, warnings);
     const output = renderRoster(team, session, roster, actions, warnings);
     if (deps.logger) deps.logger(output); else console.log(output);
@@ -126,9 +170,11 @@ export async function cmdTeamUp(team: string, opts: TeamUpOptions = {}, deps: Te
 
   if (opts.dryRun) {
     for (const item of roster) {
-      if (opts.force) {
+      if (item.state === "skipped") {
+        actions.push({ role: item.role, state: item.state, action: `skip (${item.skipReason ?? "guard"})` });
+      } else if (opts.force) {
         const command = engineCommand(item.engine, { resume: false }, config);
-        actions.push({ role: item.role, state: item.state, action: `would force fresh wake --wt ${item.worktree} -e ${item.engine} --session ${session}`, command });
+        actions.push({ role: item.role, state: item.state, action: `would force fresh wake --wt ${item.worktree} -e ${item.engine} --session ${session}${item.member.channels ? " --channels" : ""}`, command });
       } else if (item.state === "live") {
         actions.push({ role: item.role, state: item.state, action: "skip live" });
       } else if (item.state === "dead") {
@@ -136,7 +182,7 @@ export async function cmdTeamUp(team: string, opts: TeamUpOptions = {}, deps: Te
         actions.push({ role: item.role, state: item.state, action: "would relaunch in place with resume", command });
       } else {
         const command = engineCommand(item.engine, { resume: false }, config);
-        actions.push({ role: item.role, state: item.state, action: `would fresh wake --wt ${item.worktree} -e ${item.engine} --session ${session}`, command });
+        actions.push({ role: item.role, state: item.state, action: `would fresh wake --wt ${item.worktree} -e ${item.engine} --session ${session}${item.member.channels ? " --channels" : ""}`, command });
       }
     }
     warnOnPathCollisions(roster, warnings);
@@ -147,7 +193,9 @@ export async function cmdTeamUp(team: string, opts: TeamUpOptions = {}, deps: Te
 
   const sleep = deps.sleep ?? DEFAULT_SLEEP;
   for (const item of roster) {
-    if (opts.force) {
+    if (item.state === "skipped") {
+      actions.push({ role: item.role, state: item.state, action: `skip (${item.skipReason ?? "guard"})` });
+    } else if (opts.force) {
       if (item.pane) await tmux.run("kill-window", "-t", `${item.pane.sessionName ?? session}:${item.pane.windowName}`);
       const command = engineCommand(item.engine, { resume: false }, config);
       await wakeMember(repoSlug, item.member, { engine: item.engine, session, repoPath: repoRoot }, { cmdWakeFn: deps.cmdWakeFn });
@@ -169,7 +217,7 @@ export async function cmdTeamUp(team: string, opts: TeamUpOptions = {}, deps: Te
   }
 
   const finalPanes = await listPaneSnapshots(tmux).catch(() => panes);
-  const finalRoster = charter.members.map((member) => classifyMember(member, finalPanes, session, { engine: opts.engine }));
+  const finalRoster = charter.members.map((member) => classifyRosterMember(member, finalPanes, session, { engine: opts.engine, currentNode: config.node }));
   warnOnPathCollisions(finalRoster, warnings);
 
   if (opts.gather) {

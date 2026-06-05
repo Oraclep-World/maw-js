@@ -7,7 +7,7 @@ import type { MawConfig } from "../../../config/types";
 import { cmdWake, type WakeOptions } from "../../../commands/shared/wake-cmd";
 import type { TeamCharterMember } from "./team-charter";
 
-export type TeamMemberState = "live" | "dead" | "missing";
+export type TeamMemberState = "live" | "dead" | "missing" | "skipped";
 
 export interface TeamPaneSnapshot {
   sessionName: string;
@@ -25,6 +25,7 @@ export interface ClassifiedTeamMember {
   windowIdentity: string;
   state: TeamMemberState;
   pane?: TeamPaneSnapshot;
+  skipReason?: string;
 }
 
 export interface WakeMemberDeps {
@@ -120,5 +121,6 @@ export async function wakeMember(
     engine: opts.engine,
     session: opts.session,
     repoPath: opts.repoPath,
+    ...(member.channels === true ? { channels: true } : {}),
   });
 }
