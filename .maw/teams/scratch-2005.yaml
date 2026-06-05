@@ -1,7 +1,0 @@
-name: scratch-2005
-session: scr-2005
-members:
-  - role: lead
-    name: scratch-2005-bot
-    engine: node
-    worktree: false
