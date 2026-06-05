@@ -143,6 +143,27 @@ export default async function handler(ctx: InvokeContext): Promise<InvokeResult>
         force: args.includes("--force"),
         merge: args.includes("--merge"),
       });
+    } else if (sub === "up") {
+      if (!args[1]) {
+        logs.push("usage: maw team up <team> [--dry-run] [--status] [--force] [--gather] [-e <engine>]");
+        return { ok: false, error: "team required", output: logs.join("\n") };
+      }
+      const { cmdTeamUp } = await import("./team-up");
+      const flags = parseFlags(args, {
+        "--dry-run": Boolean,
+        "--status": Boolean,
+        "--force": Boolean,
+        "--gather": Boolean,
+        "--engine": String,
+        "-e": "--engine",
+      }, 2);
+      await cmdTeamUp(args[1], {
+        dryRun: Boolean(flags["--dry-run"]),
+        status: Boolean(flags["--status"]),
+        force: Boolean(flags["--force"]),
+        gather: Boolean(flags["--gather"]),
+        engine: flags["--engine"] as string | undefined,
+      });
     } else if (sub === "list" || sub === "ls" || !sub) {
       await cmdTeamList();
     } else if (sub === "add" || sub === "task") {
@@ -545,7 +566,7 @@ export default async function handler(ctx: InvokeContext): Promise<InvokeResult>
 
     } else {
       logs.push(`unknown team subcommand: ${sub}`);
-      logs.push("usage: maw team <create|spawn|send|shutdown|split|peek|hey|enter|inbox|layout|prep|recover|resume|lives|list|status|add|tasks|done|assign|delete>");
+      logs.push("usage: maw team <create|spawn|send|shutdown|up|split|peek|hey|enter|inbox|layout|prep|recover|resume|lives|list|status|add|tasks|done|assign|delete>");
       return { ok: false, error: `unknown subcommand: ${sub}`, output: logs.join("\n") };
     }
 

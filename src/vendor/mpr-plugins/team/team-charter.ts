@@ -6,16 +6,21 @@ import { cmdTeamCreate, cmdTeamSpawn } from "./team-lifecycle";
 
 export interface TeamCharterMember {
   role: string;
+  name?: string;
   target?: string;
   model?: string;
   cwd?: string;
   prompt?: string;
+  engine?: string;
+  worktree?: boolean | string;
+  queue?: string[];
 }
 
 export interface TeamCharter {
   name: string;
   description?: string;
   goal?: string;
+  session?: string;
   members: TeamCharterMember[];
   lifecycle?: Record<string, unknown>;
   governance?: Record<string, unknown>;
@@ -155,6 +160,23 @@ function parseYamlSubset(text: string): TeamCharter {
             const block = readBlock(lines, i + 1, 4);
             member[fieldKey] = block.value;
             i = block.next;
+          } else if (fieldRaw === "") {
+            const items: unknown[] = [];
+            let j = i + 1;
+            while (j < lines.length) {
+              const itemLine = lines[j]!;
+              if (!itemLine.trim()) {
+                j++;
+                continue;
+              }
+              if (lineIndent(itemLine) <= 4) break;
+              const item = itemLine.match(/^ {6}-\s*(.*)$/);
+              if (!item) throw new Error(`unsupported member field near line ${j + 1}: ${itemLine.trim()}`);
+              items.push(scalar(item[1] ?? ""));
+              j++;
+            }
+            member[fieldKey] = items;
+            i = j;
           } else {
             member[fieldKey] = scalar(fieldRaw);
             i++;
@@ -200,16 +222,23 @@ function normalizeCharter(value: unknown): TeamCharter {
     if (typeof m.role !== "string" || !m.role.trim()) throw new Error(`member ${idx + 1} requires role`);
     return {
       role: m.role.trim(),
+      ...(typeof m.name === "string" && m.name.trim() ? { name: m.name.trim() } : {}),
       ...(typeof m.target === "string" && m.target.trim() ? { target: m.target.trim() } : {}),
       ...(typeof m.model === "string" && m.model.trim() ? { model: m.model.trim() } : {}),
       ...(typeof m.cwd === "string" && m.cwd.trim() ? { cwd: m.cwd.trim() } : {}),
       ...(typeof m.prompt === "string" && m.prompt.trim() ? { prompt: m.prompt.trim() } : {}),
+      ...(typeof m.engine === "string" && m.engine.trim() ? { engine: m.engine.trim() } : {}),
+      ...(typeof m.worktree === "boolean" ? { worktree: m.worktree } : {}),
+      ...(typeof m.worktree === "string" && m.worktree.trim() ? { worktree: m.worktree.trim() } : {}),
+      ...(Array.isArray(m.queue) ? { queue: m.queue.filter((item): item is string => typeof item === "string" && item.trim()).map((item) => item.trim()) } : {}),
+      ...(typeof m.queue === "string" && m.queue.trim() ? { queue: [m.queue.trim()] } : {}),
     };
   });
   return {
     name: raw.name.trim(),
     ...(typeof raw.description === "string" && raw.description.trim() ? { description: raw.description.trim() } : {}),
     ...(typeof raw.goal === "string" && raw.goal.trim() ? { goal: raw.goal.trim() } : {}),
+    ...(typeof raw.session === "string" && raw.session.trim() ? { session: raw.session.trim() } : {}),
     members,
     ...(raw.lifecycle && typeof raw.lifecycle === "object" && !Array.isArray(raw.lifecycle) ? { lifecycle: raw.lifecycle as Record<string, unknown> } : {}),
     ...(raw.governance && typeof raw.governance === "object" && !Array.isArray(raw.governance) ? { governance: raw.governance as Record<string, unknown> } : {}),
@@ -266,8 +295,11 @@ export function formatTeamCharterPlan(plan: TeamCharterPlan): string {
     `members (${charter.members.length}):`,
     ...charter.members.map((member) => {
       const bits = [`target=${member.target ?? "auto"}`];
+      if (member.name) bits.push(`name=${member.name}`);
       if (member.model) bits.push(`model=${member.model}`);
       if (member.cwd) bits.push(`cwd=${member.cwd}`);
+      if (member.engine) bits.push(`engine=${member.engine}`);
+      if (member.worktree) bits.push(`worktree=${member.worktree}`);
       return `  - ${member.role} (${bits.join(", ")})`;
     }),
     "",
