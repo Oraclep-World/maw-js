@@ -5,7 +5,7 @@ import type { Session } from "../src/core/runtime/find-window";
 
 let fleetSessions: Record<string, string | null> = {};
 
-mock.module(join(import.meta.dir, "../src/commands/shared/wake"), () => ({
+mock.module(join(import.meta.dir, "../src/commands/shared/fleet-load"), () => ({
   resolveFleetSession: (oracle: string) => fleetSessions[oracle] ?? null,
 }));
 
