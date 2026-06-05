@@ -32,7 +32,36 @@ export interface WakeMemberDeps {
   cmdWakeFn?: typeof cmdWake;
 }
 
+export interface ClassifyMemberOptions {
+  engine?: string;
+  currentNode?: string;
+  only?: Set<string>;
+}
+
 const SHELL_RE = /^-?(zsh|bash|sh|fish)$/i;
+
+export function memberWindowIdentity(member: TeamCharterMember): string {
+  return member.name?.trim() || member.role;
+}
+
+export function memberWorktree(member: TeamCharterMember): string {
+  const identity = memberWindowIdentity(member);
+  return typeof member.worktree === "string" && member.worktree.trim() ? member.worktree.trim() : identity;
+}
+
+export function memberEngine(member: TeamCharterMember, override?: string): string {
+  return override ?? member.engine ?? member.model ?? "claude";
+}
+
+export function memberMatchesSelector(member: TeamCharterMember, selector: string): boolean {
+  const wanted = selector.trim();
+  if (!wanted) return false;
+  return member.role === wanted || memberWindowIdentity(member) === wanted || memberWorktree(member) === wanted;
+}
+
+export function isOtherNodeMember(member: TeamCharterMember, currentNode?: string): boolean {
+  return Boolean(member.node && member.node !== currentNode);
+}
 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -73,16 +102,24 @@ export function classifyMember(
   member: TeamCharterMember,
   panes: TeamPaneSnapshot[],
   session: string,
-  opts: { engine?: string } = {},
+  opts: ClassifyMemberOptions = {},
 ): ClassifiedTeamMember {
   const role = member.role;
-  const windowIdentity = member.name?.trim() || role;
+  const windowIdentity = memberWindowIdentity(member);
+  const engine = memberEngine(member, opts.engine);
+  const worktree = memberWorktree(member);
+
+  if (isOtherNodeMember(member, opts.currentNode)) {
+    return { member, role, engine, worktree, windowIdentity, state: "skipped", skipReason: `other node: ${member.node}` };
+  }
+  if (opts.only && ![member.role, windowIdentity, worktree].some((value) => opts.only!.has(value))) {
+    return { member, role, engine, worktree, windowIdentity, state: "skipped", skipReason: "outside --only" };
+  }
+
   const suffix = new RegExp(`-${escapeRegex(windowIdentity)}$`);
   const pane = panes.find((candidate) =>
     candidate.sessionName === session && (candidate.windowName === windowIdentity || suffix.test(candidate.windowName))
   );
-  const engine = opts.engine ?? member.engine ?? member.model ?? "claude";
-  const worktree = typeof member.worktree === "string" && member.worktree.trim() ? member.worktree.trim() : windowIdentity;
   if (!pane) return { member, role, engine, worktree, windowIdentity, state: "missing" };
   if (SHELL_RE.test(pane.command)) return { member, role, engine, worktree, windowIdentity, state: "dead", pane };
   if (isAgentCommand(pane.command)) return { member, role, engine, worktree, windowIdentity, state: "live", pane };
@@ -117,7 +154,7 @@ export async function wakeMember(
 ): Promise<string> {
   const wake = deps.cmdWakeFn ?? cmdWake;
   return wake(repoSlug, {
-    wt: typeof member.worktree === "string" && member.worktree.trim() ? member.worktree.trim() : (member.name?.trim() || member.role),
+    wt: memberWorktree(member),
     engine: opts.engine,
     session: opts.session,
     repoPath: opts.repoPath,
