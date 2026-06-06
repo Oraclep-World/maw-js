@@ -9,7 +9,7 @@
  * upstream CLI owns help text, verb routing, and output formatting.
  */
 
-import type { InvokeContext, InvokeResult } from "maw-js/plugin/types";
+import type { InvokeContext, InvokeResult } from "@maw-js/sdk/plugin";
 
 export const command = {
   name: "oracle-skills",
@@ -17,17 +17,17 @@ export const command = {
     "Pass through to arra-oracle-skills to manage Oracle skills across AI coding agents.",
 };
 
-export default async function handler(ctx: InvokeContext): Promise<InvokeResult> {
-  const args: string[] = ctx.source === "cli" ? (ctx.args as string[]) : [];
+export type OracleSkillsSpawn = typeof Bun.spawnSync;
 
+export function runOracleSkills(args: string[], spawn: OracleSkillsSpawn = Bun.spawnSync): InvokeResult {
   let proc: ReturnType<typeof Bun.spawnSync>;
   try {
-    proc = Bun.spawnSync(["arra-oracle-skills", ...args], {
+    proc = spawn(["arra-oracle-skills", ...args], {
       stdout: "inherit",
       stderr: "inherit",
       stdin: "inherit",
     });
-  } catch (e: any) {
+  } catch (_e: any) {
     return {
       ok: false,
       error:
@@ -46,4 +46,9 @@ export default async function handler(ctx: InvokeContext): Promise<InvokeResult>
     error: `arra-oracle-skills exited with code ${proc.exitCode}`,
     output: "",
   };
+}
+
+export default async function handler(ctx: InvokeContext): Promise<InvokeResult> {
+  const args: string[] = ctx.source === "cli" ? (ctx.args as string[]) : [];
+  return runOracleSkills(args);
 }
