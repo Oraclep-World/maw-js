@@ -56,6 +56,8 @@ await mock.module("maw-js/commands/shared/fleet-load", () => ({
 
 await mock.module("maw-js/sdk", () => ({
   ...realSdk,
+  getGhqRoot: () => mockedGhqRoot,
+  loadFleetCore: () => mockedFleet,
   hostExec: async (command: string) => {
     hostExecCalls.push(command);
 

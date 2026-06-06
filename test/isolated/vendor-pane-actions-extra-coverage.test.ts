@@ -80,6 +80,12 @@ mock.module("maw-js/sdk", () => ({
     return 1234;
   },
   buildCommandInDir: (dir: string, cmd: string) => `cd ${dir} && ${cmd}`,
+  cmdPeek: async (target: string) => {
+    peekCalls.push(target);
+  },
+  cmdSend: async (target: string, message: string, force = false) => {
+    sendCalls.push({ target, message, force });
+  },
   resolveSessionTarget: (target: string, seenSessions: Session[]) => {
     resolveCalls.push({ target, sessions: seenSessions });
     return resolveResults.get(target) ?? { kind: "none", hints: [] };
@@ -524,7 +530,7 @@ describe("entrypoint handlers for capture/attach/panes/view", () => {
     });
     expect(await captureHandler(ctx("cli", ["--full"]))).toEqual({
       ok: false,
-      error: "usage: maw capture <target> [--pane N] [--lines N] [--full]  (see: maw peek for quick glance)",
+      error: "\"--full\" looks like a flag, not a target.\n  usage: maw capture <target>  (see: maw peek for quick glance)",
     });
     expect(await captureHandler(ctx("cli", ["--wat"]))).toEqual({
       ok: false,
