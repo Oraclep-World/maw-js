@@ -1506,8 +1506,15 @@ describe("cmdWake main-suite coverage", () => {
     expect(sendTextCalls).toEqual([
       {
         target: "54-mawjs:mawjs-oracle",
-        text: `cd ${repoPath} && codex --agent mawjs-oracle -p 'quote safe'`,
+        text: `cd ${repoPath} && codex --agent mawjs-oracle`,
       },
+    ]);
+    expect(tmuxRunCalls).toContainEqual([
+      "send-keys",
+      "-t",
+      "54-mawjs:mawjs-oracle",
+      "quote safe",
+      "Enter",
     ]);
     expect(maybeSplitCalls).toEqual([
       { target: "54-mawjs:mawjs-oracle", opts: expect.objectContaining({ split: true, window: true }) },
@@ -1683,8 +1690,15 @@ describe("cmdWake main-suite coverage", () => {
     });
     expect(sendTextCalls).toContainEqual({
       target: "54-mawjs:mawjs-fix-a",
-      text: `cd ${wtPath} && codex --agent mawjs-fix-a -p 'hello oracle'`,
+      text: `cd ${wtPath} && codex --agent mawjs-fix-a`,
     });
+    expect(tmuxRunCalls).toContainEqual([
+      "send-keys",
+      "-t",
+      "54-mawjs:mawjs-fix-a",
+      "hello oracle",
+      "Enter",
+    ]);
     expect(writeSignalCalls).toEqual([
       {
         root: repoPath,
