@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
+import { mockConfigModule } from "./helpers/mock-config";
 
 const sdkPath = import.meta.resolve("../src/sdk/index.ts");
 const configPath = import.meta.resolve("../src/config.ts");
@@ -8,6 +9,7 @@ let nextError: Error | null = null;
 let calls: Array<{ url: string; opts: Record<string, unknown> }> = [];
 
 mock.module(configPath, () => ({
+  ...mockConfigModule(() => ({ node: "test", oracle: "mawjs" })),
   cfgTimeout: () => 1234,
 }));
 
@@ -25,6 +27,10 @@ beforeEach(() => {
   nextResponse = { ok: true, status: 200, data: { node: "alpha", agents: ["mawjs", 7, "sila"] } };
   nextError = null;
   calls = [];
+});
+
+afterAll(() => {
+  mock.restore();
 });
 
 describe("fetchExpandProbeIdentity", () => {

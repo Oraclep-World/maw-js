@@ -124,9 +124,10 @@ export async function curlFetch(url: string, opts?: {
 
 async function nativeFetch(url: string, opts: typeof curlFetch extends (u: string, o?: infer O) => any ? O : never, headers: Record<string, string>): Promise<CurlResponse> {
   const maxBytes = opts?.maxBytes ?? DEFAULT_MAX_BYTES;
+  const controller = new AbortController();
+  let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), opts?.timeout || 10000);
+    timeout = setTimeout(() => controller.abort(), opts?.timeout || 10000);
     const res = await fetch(url, {
       method: opts?.method || "GET",
       headers,
@@ -134,6 +135,7 @@ async function nativeFetch(url: string, opts: typeof curlFetch extends (u: strin
       signal: controller.signal,
     });
     clearTimeout(timeout);
+    timeout = undefined;
 
     // #653: reject before buffering if the peer declares an oversized body.
     const declared = Number(res.headers.get("content-length") ?? 0);
@@ -177,6 +179,8 @@ async function nativeFetch(url: string, opts: typeof curlFetch extends (u: strin
     const msg = err instanceof Error ? err.message : String(err);
     console.warn(`\x1b[33m⚠\x1b[0m nativeFetch failed: ${opts?.method ?? "GET"} ${url} — ${msg}`);
     return { ok: false, status: 0, data: null };
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
   }
 }
 
