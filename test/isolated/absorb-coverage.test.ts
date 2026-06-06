@@ -1,8 +1,9 @@
 import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
+const root = join(import.meta.dir, "../..");
 const tmpRoot = mkdtempSync(join(tmpdir(), "maw-absorb-coverage-"));
 const fleetDir = join(tmpRoot, "fleet");
 const archiveSoulSyncPath = import.meta.resolve("../../src/vendor/mpr-plugins/archive/internal/soul-sync-impl.ts");
@@ -31,6 +32,7 @@ mock.module("maw-js/sdk", () => ({
     }
     return "";
   },
+  loadFleetEntries: () => fleetEntries,
 }));
 
 mock.module("maw-js/config/ghq-root", () => ({
@@ -186,6 +188,12 @@ describe("absorb handler", () => {
 });
 
 describe("absorb impl", () => {
+  test("imports fleet entry lookup through the SDK boundary", () => {
+    const impl = readFileSync(join(root, "src/vendor/mpr-plugins/absorb/impl.ts"), "utf8");
+    expect(impl).toContain('from "maw-js/sdk"');
+    expect(impl).not.toContain('maw-js/commands/shared/fleet-load');
+  });
+
   test("matches donor and receiver names across session, group, repo, and -oracle suffixes", () => {
     const entries = [
       fleetEntry("050-sage-vector-fix", "050-sage-vector-fix.json", { repo: "Soul-Brews-Studio/sage-vector-fix-oracle" }),
