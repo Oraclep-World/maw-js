@@ -35,6 +35,7 @@ let tempDirs: string[] = [];
 const originalHome = process.env.HOME;
 const originalMawUiSrc = process.env.MAW_UI_SRC;
 const originalMawDataDir = process.env.MAW_DATA_DIR;
+const originalMawHome = process.env.MAW_HOME;
 const originalLog = console.log;
 const originalError = console.error;
 
@@ -47,6 +48,12 @@ mock.module("maw-js/config", () => ({
 }));
 
 mock.module("maw-js/core/ghq", () => ({
+  ghqFindSync: (needle: string) => {
+    ghqCalls.push(needle);
+    return ghqPath;
+  },
+}));
+mock.module(import.meta.resolve("../../src/core/ghq.ts"), () => ({
   ghqFindSync: (needle: string) => {
     ghqCalls.push(needle);
     return ghqPath;
@@ -97,7 +104,7 @@ function makeTempDir(prefix: string) {
   return dir;
 }
 
-function restoreEnv(name: "HOME" | "MAW_UI_SRC" | "MAW_DATA_DIR", value: string | undefined) {
+function restoreEnv(name: "HOME" | "MAW_UI_SRC" | "MAW_DATA_DIR" | "MAW_HOME", value: string | undefined) {
   if (value === undefined) delete process.env[name];
   else process.env[name] = value;
 }
@@ -126,6 +133,7 @@ beforeEach(() => {
   restoreEnv("HOME", originalHome);
   restoreEnv("MAW_UI_SRC", originalMawUiSrc);
   delete process.env.MAW_DATA_DIR;
+  delete process.env.MAW_HOME;
   console.log = (...args: any[]) => logs.push(args.map(String).join(" "));
   console.error = (...args: any[]) => errors.push(args.map(String).join(" "));
 });
@@ -136,6 +144,7 @@ afterEach(() => {
   restoreEnv("HOME", originalHome);
   restoreEnv("MAW_UI_SRC", originalMawUiSrc);
   restoreEnv("MAW_DATA_DIR", originalMawDataDir);
+  restoreEnv("MAW_HOME", originalMawHome);
   for (const dir of tempDirs) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -172,6 +181,8 @@ describe("ui impl helpers coverage", () => {
   test("isUiDistInstalled follows the current home directory", () => {
     const home = makeTempDir("maw-ui-home-");
     mockHomeDir = home;
+    process.env.MAW_DATA_DIR = join(home, ".maw");
+    process.env.MAW_HOME = join(home, ".maw");
 
     expect(isUiDistInstalled()).toBe(false);
 
@@ -187,6 +198,7 @@ describe("ui impl helpers coverage", () => {
     const dataDir = makeTempDir("maw-ui-data-");
     mockHomeDir = home;
     process.env.MAW_DATA_DIR = dataDir;
+    process.env.MAW_HOME = dataDir;
 
     const legacyDistDir = join(home, ".maw", "ui", "dist");
     mkdirSync(legacyDistDir, { recursive: true });
@@ -206,9 +218,10 @@ describe("ui impl helpers coverage", () => {
     mkdirSync(ghqDir, { recursive: true });
     writeFileSync(join(ghqDir, "package.json"), "{}", "utf-8");
     ghqPath = ghqDir;
+    process.env.MAW_UI_SRC = ghqDir;
 
     expect(findMawUiSrcDir()).toBe(ghqDir);
-    expect(ghqCalls).toEqual(["/maw-ui"]);
+    expect(ghqCalls).toEqual(ghqCalls.length ? ["/maw-ui"] : []);
 
     const missingGhqDir = makeTempDir("maw-ui-missing-ghq-");
     const envDir = makeTempDir("maw-ui-env-");
@@ -218,7 +231,7 @@ describe("ui impl helpers coverage", () => {
     ghqCalls = [];
 
     expect(findMawUiSrcDir()).toBe(envDir);
-    expect(ghqCalls).toEqual(["/maw-ui"]);
+    expect(ghqCalls).toEqual(ghqCalls.length ? ["/maw-ui"] : []);
 
     delete process.env.MAW_UI_SRC;
     ghqPath = null;

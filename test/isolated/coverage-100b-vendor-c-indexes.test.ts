@@ -17,6 +17,24 @@ let messageEvents: unknown[] = [];
 let registry: any = { updated: "now", plugins: {}, packages: {} };
 let searchResult: any = { queried: 0, responded: 0, elapsedMs: 0, hits: [], errors: [] };
 
+
+function parseFlagsMock(args: string[], spec: Record<string, unknown> = {}, _min = 0) {
+  const out: Record<string, any> = { _: [] };
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    const mapped = spec[arg];
+    if (arg.startsWith("--") && mapped !== undefined) {
+      const key = typeof mapped === "string" ? mapped : arg;
+      if (mapped === Boolean) out[key] = true;
+      else if (mapped === Number) out[key] = Number(args[++i]);
+      else out[key] = args[++i];
+    } else {
+      out._.push(arg);
+    }
+  }
+  return out;
+}
+
 function record(name: string, ...args: unknown[]) {
   calls.push([name, ...args]);
   console.log(`${name}:ok`);
@@ -25,8 +43,13 @@ function record(name: string, ...args: unknown[]) {
 
 const sdkMock = {
   resolveSessionTarget: (target: string, rows: any[]) => {
-    const match = rows.find(row => row.name === target) ?? rows[0];
-    return match ? { kind: "exact", match } : { kind: "none", hints: [] };
+    const exact = rows.find(row => row.name === target);
+    if (exact) return { kind: "exact", match: exact };
+    const suffix = rows.filter(row => row.name.endsWith(`-${target}`));
+    if (suffix.length === 1) return { kind: "fuzzy", match: suffix[0] };
+    if (suffix.length > 1) return { kind: "ambiguous", candidates: suffix };
+    const hints = rows.filter(row => row.name.includes(target));
+    return { kind: "none", hints };
   },
   listSessions: async () => sessions,
   hostExec: async (cmd: string) => { hostExecCalls.push(cmd); return await hostExecImpl(cmd); },
@@ -40,14 +63,31 @@ const sdkMock = {
   Tmux: class { async sendKeysLiteral(target: string, text: string) { sendKeysLiteralCalls.push([target, text]); } },
   loadFleetCore: () => [],
   loadFleetEntries: () => [],
+  loadConfig: () => ({ host: "local", disabledPlugins: [] }),
+  getGhqRoot: () => "/tmp/ghq",
+  cmdSleep: async () => record("sleep"),
+  takeSnapshot: async () => undefined,
+  saveTabOrder: async () => undefined,
   countDisabledFleetFilesCore: () => 0,
   loadDisabledFleetEntriesCore: () => [],
-  parseFlags: (args: string[]) => ({ _: args.filter((a) => !String(a).startsWith("--")) }),
+  parseFlags: parseFlagsMock,
 };
 mock.module("maw-js/sdk", () => sdkMock);
+mock.module("@maw-js/sdk", () => ({
+  ...sdkMock,
+  mawStatePath: (...parts: string[]) => ["/tmp/maw-state", ...parts].join("/"),
+  isMessageLifecycleData: (data: unknown) => Boolean((data as any)?.id),
+}));
 mock.module(import.meta.resolve("../../src/sdk"), () => sdkMock);
 mock.module(import.meta.resolve("../../src/sdk/index.ts"), () => sdkMock);
 mock.module("maw-js/config", () => ({ loadConfig: () => ({ host: "local", disabledPlugins: [] }) }));
+mock.module("maw-js/cli/parse-args", () => ({ parseFlags: parseFlagsMock }));
+mock.module(import.meta.resolve("../../src/cli/parse-args.ts"), () => ({ parseFlags: parseFlagsMock }));
+mock.module(import.meta.resolve("../../src/vendor/mpr-plugins/contacts/impl.ts"), () => ({
+  cmdContactsLs: async () => record("contacts-ls"),
+  cmdContactsAdd: async (name: string, args: string[]) => record("contacts-add", name, args),
+  cmdContactsRm: async (name: string) => record("contacts-rm", name),
+}));
 mock.module("maw-js/commands/shared/comm-send", () => ({ resolveOraclePane: async (target: string) => `pane:${target}` }));
 mock.module("maw-js/commands/shared/fleet-load", () => ({ loadFleet: () => [] }));
 mock.module("maw-js/core/transport/tmux", () => ({
@@ -66,7 +106,10 @@ mock.module(import.meta.resolve("../../src/vendor/mpr-plugins/kill/internal/peer
     return { ok: true, data: { output: "remote killed" } };
   },
 }));
-mock.module("maw-js/commands/shared/wake", () => ({ cmdWake: async (oracle: string, opts: unknown) => record("wake", oracle, opts) }));
+mock.module("maw-js/commands/shared/wake", () => ({
+  cmdWake: async (oracle: string, opts: unknown) => record("wake", oracle, opts),
+  detectSession: async () => "alpha",
+}));
 mock.module("maw-js/commands/shared/fleet", () => ({ cmdWakeAll: async (opts: unknown) => record("wake-all", opts) }));
 mock.module("maw-js/commands/shared/wake-target", () => ({
   parseWakeTarget: () => null,
