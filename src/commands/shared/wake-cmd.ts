@@ -13,6 +13,7 @@ import * as wakeSession from "./wake-session";
 import { maybeOpenWindow, maybeSplit } from "./wake-maybe-split";
 import { runWakeLifecycleHooks } from "../../plugin/lifecycle";
 import { ensureFleetSessionEntry } from "./fleet-ensure";
+import { isClaudeLikeEngine } from "../../core/engine/is-claude-like";
 import { parseWakeTarget, ensureCloned } from "./wake-target";
 import { assertAgentCapacity } from "./wake-concurrency";
 import { latestSnapshot, loadSnapshot, type Snapshot, type SnapshotSession } from "../../core/fleet/snapshot";
@@ -450,7 +451,13 @@ async function currentTmuxSessionFromPane(): Promise<string | null> {
 }
 
 function isClaudeEngine(engine: string | undefined): boolean {
-  return engine?.trim().toLowerCase() === "claude";
+  let config: Partial<import("../../config/types").MawConfig> = {};
+  try {
+    config = loadConfig();
+  } catch {
+    // fall back to registry defaults when config is unreadable
+  }
+  return isClaudeLikeEngine(engine, config);
 }
 
 async function sendPromptViaTmux(target: string, prompt: string): Promise<void> {
