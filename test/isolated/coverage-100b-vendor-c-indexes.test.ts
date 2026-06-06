@@ -37,7 +37,19 @@ const sdkMock = {
   MAW_ROOT: "/tmp/maw",
   resolveTarget: () => resolveTargetResult,
   curlFetch: async () => ({ ok: true, data: { ok: true, target: "remote:1" } }),
+  capture: async () => "",
+  findWindow: async () => null,
+  scanWorktrees: async () => [],
+  cleanupWorktree: async () => undefined,
+  getPaneInfos: async () => ({}),
+  getPaneCommand: async () => "codex",
+  isAgentCommand: () => true,
+  restoreTabOrder: async () => undefined,
+  saveTabOrder: async () => undefined,
+  takeSnapshot: async () => undefined,
   Tmux: class { async sendKeysLiteral(target: string, text: string) { sendKeysLiteralCalls.push([target, text]); } },
+  loadConfig: () => ({ host: "local", disabledPlugins: [], psiPath: "/tmp/maw-coverage-100b-psi" }),
+  getGhqRoot: () => "/tmp/maw-coverage-100b-ghq",
   loadFleetCore: () => [],
   loadFleetEntries: () => [],
   countDisabledFleetFilesCore: () => 0,
@@ -47,11 +59,47 @@ const sdkMock = {
 mock.module("maw-js/sdk", () => sdkMock);
 mock.module(import.meta.resolve("../../src/sdk"), () => sdkMock);
 mock.module(import.meta.resolve("../../src/sdk/index.ts"), () => sdkMock);
-mock.module("maw-js/config", () => ({ loadConfig: () => ({ host: "local", disabledPlugins: [] }) }));
-mock.module("maw-js/commands/shared/comm-send", () => ({ resolveOraclePane: async (target: string) => `pane:${target}` }));
-mock.module("maw-js/commands/shared/fleet-load", () => ({ loadFleet: () => [] }));
+mock.module("maw-js/config", () => ({
+  loadConfig: () => ({ host: "local", node: "local", disabledPlugins: [], psiPath: "/tmp/maw-coverage-100b-psi" }),
+  saveConfig: () => undefined,
+  cfgTimeout: () => 1000,
+  cfgLimit: () => 1,
+  cfgInterval: () => 1000,
+  cfg: (_key: string, fallback: unknown) => fallback,
+  D: {},
+  buildCommand: () => "cmd",
+  buildCommandInDir: () => "cmd",
+  getEnvVars: () => ({}),
+}));
+mock.module("maw-js/commands/shared/comm-send", () => ({
+  resolveOraclePane: async (target: string) => `pane:${target}`,
+  checkPaneIdle: async () => ({ idle: true }),
+  cmdSend: async (opts: unknown) => record("cmd-send", opts),
+  resolveMyName: () => "local",
+  parseSenderOverride: () => null,
+  hasSshRelayEnv: () => false,
+  resolveSenderIdentity: () => ({ node: "local", oracle: "local", display: "local", wireFrom: "local", senderName: "local" }),
+  formatSignedMessage: (_identity: unknown, text: string) => text,
+  formatBareNameError: (query: string) => `bare ${query}`,
+  formatBareNameAmbiguousError: (query: string) => `ambiguous ${query}`,
+  resolveTeamWorkspaceMemberTarget: () => null,
+  verifySubmitDelivered: async () => ({ ok: true }),
+}));
+mock.module("maw-js/commands/shared/fleet-load", () => ({
+  loadFleet: () => [],
+  loadFleetEntries: () => [],
+  countDisabledFleetFiles: () => 0,
+  loadDisabledFleetEntries: () => [],
+  resolveFleetSession: () => null,
+}));
 mock.module("maw-js/core/transport/tmux", () => ({
+  tmuxCmd: () => "tmux",
+  tmux: { run: async (...args: string[]) => tmuxRunImpl(...args) },
   Tmux: class { async run(...args: string[]) { return await tmuxRunImpl(...args); } },
+  withPaneLock: async (_target: string, fn: () => unknown) => fn(),
+  splitWindowLocked: async () => undefined,
+  tagPane: async () => undefined,
+  readPaneTags: async () => ({}),
 }));
 
 mock.module(import.meta.resolve("../../src/vendor/mpr-plugins/kill/impl.ts"), () => ({ cmdKill: async (target: string, opts: unknown) => record("kill", target, opts) }));
@@ -66,7 +114,16 @@ mock.module(import.meta.resolve("../../src/vendor/mpr-plugins/kill/internal/peer
     return { ok: true, data: { output: "remote killed" } };
   },
 }));
-mock.module("maw-js/commands/shared/wake", () => ({ cmdWake: async (oracle: string, opts: unknown) => record("wake", oracle, opts) }));
+mock.module("maw-js/commands/shared/wake", () => ({
+  cmdWake: async (oracle: string, opts: unknown) => record("wake", oracle, opts),
+  findWorktrees: async () => [],
+  detectSession: async () => null,
+  resolveFleetSession: () => null,
+  fetchIssuePrompt: async (n: number) => `issue-${n}-prompt`,
+  fetchGitHubPrompt: async (kind: string, n: number) => `${kind}-${n}-prompt`,
+  isPaneIdle: async () => true,
+  ensureSessionRunning: async () => undefined,
+}));
 mock.module("maw-js/commands/shared/fleet", () => ({ cmdWakeAll: async (opts: unknown) => record("wake-all", opts) }));
 mock.module("maw-js/commands/shared/wake-target", () => ({
   parseWakeTarget: () => null,
@@ -100,7 +157,11 @@ mock.module(import.meta.resolve("../../src/vendor/mpr-plugins/messages/ledger.ts
   messageLedgerDbPath: () => "/tmp/messages.db",
   recordMessageLedgerEvent: (data: unknown) => calls.push(["message-event", data]),
 }));
-mock.module("maw-js/lib/message-events", () => ({ isMessageLifecycleData: (data: unknown) => Boolean((data as any)?.id) }));
+mock.module("maw-js/lib/message-events", () => ({
+  isMessageLifecycleData: (data: unknown) => Boolean((data as any)?.id),
+  buildMessageLifecycleData: (input: unknown) => input,
+  buildMessageLifecycleFeedEvent: (input: unknown) => ({ type: "message", data: input }),
+}));
 mock.module(import.meta.resolve("../../src/commands/plugins/plugin/registry-fetch.ts"), () => ({
   registryUrl: () => "https://registry.invalid/plugins.json",
   getRegistry: async () => registry,

@@ -42,6 +42,8 @@ const sdkMock = {
     return hostExecImpl(cmd);
   },
   tmuxCmd: () => "tmux-test",
+  curlFetch: async () => ({ ok: true, data: {} }),
+  scanWorktrees: async () => [],
   saveTabOrder: async (session: string) => {
     calls.push(`save:${session}`);
   },
@@ -80,10 +82,19 @@ mock.module("maw-js/core/matcher/resolve-target", () => ({
     const match = inputSessions.find((session) => session.name === target) ?? inputSessions[0];
     return match ? { kind: "exact", match } : { kind: "none", hints: [] };
   },
+  resolveWorktreeTarget: (target: string, worktrees: Array<{ name: string }>) => {
+    const match = worktrees.find((worktree) => worktree.name === target) ?? worktrees[0];
+    return match ? { kind: "exact", match } : { kind: "none", hints: [] };
+  },
+  resolveNumericFleetStemPrefix: () => ({ kind: "none", hints: [] }),
+  resolveFleetWindowSessionTarget: () => ({ kind: "none", hints: [] }),
 }));
 
 mock.module("maw-js/commands/shared/wake", () => ({ detectSession: async () => "alpha" }));
-mock.module("maw-js/commands/shared/fleet-load", () => ({ loadFleet: () => [] }));
+mock.module("maw-js/commands/shared/fleet-load", () => ({
+  loadFleet: () => [],
+  resolveFleetSession: () => null,
+}));
 mock.module("maw-js/plugin/lifecycle", () => ({
   runSleepLifecycleHooks: async (ctx: { oracle: string; session: string; window: string }) => {
     calls.push(`hook:${ctx.oracle}:${ctx.session}:${ctx.window}`);
