@@ -75,12 +75,15 @@ mock.module("maw-js/sdk", () => sdkMock);
 mock.module(import.meta.resolve("../../src/sdk"), () => sdkMock);
 mock.module(import.meta.resolve("../../src/sdk/index.ts"), () => sdkMock);
 
-mock.module("maw-js/core/matcher/resolve-target", () => ({
+const resolveTargetMock = {
   resolveSessionTarget: (target: string, inputSessions: typeof sessions) => {
     const match = inputSessions.find((session) => session.name === target) ?? inputSessions[0];
     return match ? { kind: "exact", match } : { kind: "none", hints: [] };
   },
-}));
+  resolveWorktreeTarget: () => ({ kind: "none", hints: [] }),
+};
+mock.module("maw-js/core/matcher/resolve-target", () => resolveTargetMock);
+mock.module(import.meta.resolve("../../src/core/matcher/resolve-target.ts"), () => resolveTargetMock);
 
 mock.module("maw-js/commands/shared/wake", () => ({ detectSession: async () => "alpha" }));
 mock.module("maw-js/commands/shared/fleet-load", () => ({ loadFleet: () => [] }));

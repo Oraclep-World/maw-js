@@ -43,6 +43,7 @@ const sdkMock = {
   countDisabledFleetFilesCore: () => 0,
   loadDisabledFleetEntriesCore: () => [],
   parseFlags: (args: string[]) => ({ _: args.filter((a) => !String(a).startsWith("--")) }),
+  loadConfig: () => ({ host: "local", disabledPlugins: [] }),
 };
 mock.module("maw-js/sdk", () => sdkMock);
 mock.module(import.meta.resolve("../../src/sdk"), () => sdkMock);
