@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { loadManifestFromDir } from "../../src/plugin/manifest-load";
 import { invokePlugin } from "../../src/plugin/registry-invoke";
 import type { LoadedPlugin } from "../../src/plugin/types";
-import { resetConfig } from "maw-js/sdk";
+import { resetConfig } from "../../src/config";
 
 const ROOT = new URL("../..", import.meta.url).pathname;
 

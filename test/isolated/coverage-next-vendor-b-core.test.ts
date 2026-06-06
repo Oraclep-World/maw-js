@@ -73,6 +73,8 @@ const sdkMock = {
 };
 mock.module("maw-js/sdk", () => sdkMock);
 mock.module(import.meta.resolve("../../src/sdk"), () => sdkMock);
+mock.module(import.meta.resolve("../../src/sdk.ts"), () => sdkMock);
+mock.module(import.meta.resolve("../../src/sdk/index"), () => sdkMock);
 mock.module(import.meta.resolve("../../src/sdk/index.ts"), () => sdkMock);
 
 mock.module("maw-js/core/matcher/resolve-target", () => ({

@@ -78,7 +78,9 @@ const sdkMock = {
 };
 await mock.module("maw-js/sdk", () => sdkMock);
 await mock.module(import.meta.resolve("../../src/sdk"), () => sdkMock);
-await mock.module(import.meta.resolve("../../src/sdk/index.ts"), () => sdkMock);
+mock.module(import.meta.resolve("../../src/sdk.ts"), () => sdkMock);
+await mock.module(import.meta.resolve("../../src/sdk/index"), () => sdkMock);
+mock.module(import.meta.resolve("../../src/sdk/index.ts"), () => sdkMock);
 
 const { cmdFind } = await import("../../src/vendor/mpr-plugins/find/impl.ts?find-impl-coverage");
 
