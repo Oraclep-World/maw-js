@@ -315,7 +315,7 @@ github: prefix → delegates to setup wizard`,
         return { ok: true };
       }
 
-      const { ghqFind } = await import("../../../core/ghq");
+      const { ghqFind } = await import("../../../sdk");
       const { unlinkSync, rmdirSync } = await import("fs");
       const { join: pathJoin } = await import("path");
       const { homedir: hd } = await import("os");
