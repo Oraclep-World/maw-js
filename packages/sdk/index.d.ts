@@ -406,6 +406,22 @@ export declare function importPluginSymbol<T = unknown>(
 ): Promise<T>;
 
 
+
+// --- src/commands/shared/scan-signals ---
+
+export type SignalKind = "info" | "alert" | "pattern";
+export interface Signal {
+  timestamp: string;
+  bud: string;
+  kind: SignalKind;
+  message: string;
+  context?: Record<string, unknown>;
+}
+export interface ScannedSignal extends Signal {
+  file: string;
+}
+export declare function scanSignals(root: string, opts?: { days?: number }): ScannedSignal[];
+
 // --- src/core/agent-detect ---
 
 /** Return true when a tmux pane command appears to be an agent runtime. */

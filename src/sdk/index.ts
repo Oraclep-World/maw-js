@@ -213,3 +213,8 @@ export function definePlugin(config: PluginConfig): PluginConfig {
   if (typeof config.handler !== "function") throw new Error("definePlugin: handler is required");
   return config;
 }
+
+// ─── src/commands/shared/scan-signals ───────────────────────────────────────
+// Bud signal scanner used by the standalone signals plugin.
+export { scanSignals } from "../commands/shared/scan-signals";
+export type { ScannedSignal } from "../commands/shared/scan-signals";

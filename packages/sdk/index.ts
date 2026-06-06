@@ -168,6 +168,12 @@ export type { TProfile } from "../../src/lib/schemas";
 export { importPluginSymbol } from "../../src/plugin/registry";
 
 
+
+// ─── src/commands/shared/scan-signals ───────────────────────────────────────
+// Bud signal scanner used by the standalone signals plugin.
+export { scanSignals } from "../../src/commands/shared/scan-signals";
+export type { ScannedSignal } from "../../src/commands/shared/scan-signals";
+
 // ─── src/core/agent-detect ──────────────────────────────────────────────────
 // Lightweight agent-pane detection used by broadcast and send helpers.
 export { isAgentCommand } from "../../src/core/agent-detect";

@@ -22,7 +22,7 @@ let fakeError: Error | null = null;
 let emitScanWarning = false;
 let scanCalls: ScanCall[] = [];
 
-mock.module("maw-js/commands/shared/scan-signals", () => ({
+mock.module("@maw-js/sdk", () => ({
   scanSignals: (root: string, opts: { days?: number } = {}) => {
     scanCalls.push({ root, opts });
     if (emitScanWarning) console.error("scan warning", root);
@@ -34,6 +34,19 @@ mock.module("maw-js/commands/shared/scan-signals", () => ({
 const { command, default: handler } = await import(
   "../../src/vendor/mpr-plugins/signals/index.ts?signals-plugin-coverage"
 );
+
+
+function parseImportSpecs(source: string): string[] {
+  const specs = new Set<string>();
+  const importFrom = /\b(?:import|export)\s+(?:[^"'`]+?\s+from\s+)?["']([^"']+)["']/g;
+  const importFn = /\bimport\(\s*["']([^"']+)["']\s*\)/g;
+  const requireFn = /\brequire\(\s*["']([^"']+)["']\s*\)/g;
+  for (const re of [importFrom, importFn, requireFn]) {
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(source)) !== null) specs.add(m[1]);
+  }
+  return [...specs];
+}
 
 function stripAnsi(value: string): string {
   return value.replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, "");
@@ -70,7 +83,16 @@ afterAll(() => {
   rmSync(tmpBase, { recursive: true, force: true });
 });
 
-describe("signals plugin index", () => {
+describe("signals plugin standalone boundary (#2113)", () => {
+
+  test("has no private maw-js imports", () => {
+    const source = Bun.file(join(new URL("../..", import.meta.url).pathname, "src/vendor/mpr-plugins/signals/index.ts")).text();
+    const imports = parseImportSpecs(source);
+    expect(imports.filter((spec) => spec.startsWith("maw-js/"))).toEqual([]);
+    expect(imports.filter((spec) => spec.startsWith("../"))).toEqual([]);
+    expect(imports).toEqual(expect.arrayContaining(["@maw-js/sdk", "@maw-js/sdk/plugin"]));
+  });
+
   test("exports command metadata", () => {
     expect(command).toEqual({
       name: "signals",
