@@ -1,5 +1,7 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
+import type { MawConfig } from "../../config/types";
+import { isClaudeLikeEngine } from "../../core/engine/is-claude-like";
 
 export interface WakeInboxMessage {
   path: string;
@@ -25,13 +27,10 @@ export interface WakeInboxDrainDeps {
   markRead?: boolean;
   byteBudget?: number;
   engine?: string;
+  config?: Partial<MawConfig>;
 }
 
 export const DEFAULT_WAKE_INBOX_BYTE_BUDGET = 64 * 1024;
-
-function isClaudeEngine(engine?: string): boolean {
-  return engine?.trim().toLowerCase() === "claude";
-}
 
 function utf8Bytes(value: string): number {
   return Buffer.byteLength(value, "utf-8");
@@ -108,7 +107,7 @@ export function drainWakeInbox(repoPath: string, deps: WakeInboxDrainDeps = {}):
   const markRead = deps.markRead ?? true;
   const byteBudget = Math.max(0, Math.floor(deps.byteBudget ?? DEFAULT_WAKE_INBOX_BYTE_BUDGET));
   const engine = deps.engine;
-  if (engine !== undefined && !isClaudeEngine(engine)) {
+  if (engine !== undefined && !isClaudeLikeEngine(engine, deps.config ?? {})) {
     return { count: 0, prompt: "", messages: [], omittedCount: 0, byteBudget };
   }
 
