@@ -217,6 +217,12 @@ export interface TmuxLsOpts {
 
 export type PaneStatus = "frozen" | "active" | "idle" | "stale" | "unknown";
 
+export interface PaneWorktreeJson {
+  path: string;
+  branch: string | null;
+  head: string | null;
+}
+
 interface AnnotatedPane {
   id: string;
   target: string;
@@ -229,6 +235,34 @@ interface AnnotatedPane {
   sessionCreated?: number;
   sessionActivity?: number;
   source?: string;
+  cwd?: string;
+}
+
+function sh(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+export async function describePaneWorktree(cwd: string | undefined): Promise<PaneWorktreeJson | null> {
+  const start = cwd?.trim();
+  if (!start) return null;
+  const path = (await hostExec(`git -C ${sh(start)} rev-parse --show-toplevel`).catch(() => "")).trim();
+  if (!path) return null;
+  const [branch, head] = await Promise.all([
+    hostExec(`git -C ${sh(path)} branch --show-current`).catch(() => ""),
+    hostExec(`git -C ${sh(path)} rev-parse --short=8 HEAD`).catch(() => ""),
+  ]);
+  return {
+    path,
+    branch: branch.trim() || null,
+    head: head.trim() || null,
+  };
+}
+
+async function panesForJson(panes: AnnotatedPane[]): Promise<Array<Omit<AnnotatedPane, "cwd"> & { worktree: PaneWorktreeJson | null }>> {
+  return await Promise.all(panes.map(async ({ cwd, ...pane }) => ({
+    ...pane,
+    worktree: await describePaneWorktree(cwd),
+  })));
 }
 
 async function markContextLimitedPanes(panes: AnnotatedPane[]): Promise<void> {
@@ -389,6 +423,7 @@ export async function cmdTmuxLs(opts: TmuxLsOpts = {}): Promise<void> {
       sessionCreated: createdBySession.get(session),
       sessionActivity: activityBySession.get(session),
       source: (p as { source?: string; node?: string }).source ?? (p as { node?: string }).node,
+      cwd: p.cwd,
     };
   });
 
@@ -449,6 +484,7 @@ export async function cmdTmuxLs(opts: TmuxLsOpts = {}): Promise<void> {
   await markContextLimitedPanes(scope);
 
   if (opts.json) {
+    const paneRows = await panesForJson(scope);
     const teamRows = visibleTeams.map(team => ({
       kind: "team",
       id: `team:${team.name}`,
@@ -463,7 +499,7 @@ export async function cmdTmuxLs(opts: TmuxLsOpts = {}): Promise<void> {
       members: team.memberCount,
       configPath: team.configPath,
     }));
-    console.log(JSON.stringify([...scope, ...teamRows], null, 2));
+    console.log(JSON.stringify([...paneRows, ...teamRows], null, 2));
     return;
   }
 
