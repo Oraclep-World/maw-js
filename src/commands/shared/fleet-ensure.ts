@@ -42,12 +42,15 @@ function isInside(parent: string, child: string): boolean {
 function repoFromCwd(cwd: string | undefined, ghqRoot: string): string | null {
   if (!cwd) return null;
   const resolvedCwd = resolve(cwd);
-  const candidates = [resolve(ghqRoot), resolve(ghqRoot, "github.com")];
-  for (const root of candidates) {
+  const candidates: Array<{ root: string; segments: number }> = [
+    { root: resolve(ghqRoot), segments: 3 },
+    { root: resolve(ghqRoot, "github.com"), segments: 2 },
+  ];
+  for (const { root, segments } of candidates) {
     if (!isInside(root, resolvedCwd)) continue;
-    const rel = relative(root, resolvedCwd).split(sep).join("/");
-    if (!rel || rel.startsWith("..") || rel.split("/").length < 2) continue;
-    return rel;
+    const parts = relative(root, resolvedCwd).split(sep);
+    if (parts.length < segments || parts[0] === "..") continue;
+    return parts.slice(0, segments).join("/");
   }
   return null;
 }
