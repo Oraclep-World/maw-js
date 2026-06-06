@@ -60,6 +60,7 @@ let listSessionsReturn: Session[];
 let resolveTargetReturn: ResolvedTarget;
 let resolveTargetError: Error | null;
 let resolveTargetCalls: string[];
+let resolveTargetArgCalls: Parameters<typeof _rSdk.resolveTarget>[];
 let resolveTargetHandler: ((query: string) => ResolvedTarget) | null;
 let findPeerUrl: string | null;
 let getPaneCommandReturn: string;
@@ -108,6 +109,7 @@ mock.module(join(import.meta.dir, "../src/sdk"), () => ({
   resolveTarget: (...args: Parameters<typeof _rSdk.resolveTarget>) => {
     if (!mockActive) return realSdk.resolveTarget(...args);
     resolveTargetCalls.push(args[0]);
+    resolveTargetArgCalls.push(args);
     if (resolveTargetError) throw resolveTargetError;
     if (resolveTargetHandler) return resolveTargetHandler(args[0]);
     return resolveTargetReturn as ReturnType<typeof _rSdk.resolveTarget>;
@@ -261,6 +263,7 @@ beforeEach(() => {
   resolveTargetReturn = { type: "local", target: "session:oracle.0" };
   resolveTargetError = null;
   resolveTargetCalls = [];
+  resolveTargetArgCalls = [];
   resolveTargetHandler = null;
   findPeerUrl = null;
   getPaneCommandReturn = "claude";
@@ -327,6 +330,17 @@ afterAll(() => {
 });
 
 describe("cmdSend — delivery branch coverage", () => {
+  test("caller-supplied currentSession scopes target resolution", async () => {
+    captureResponses = ["accepted"];
+
+    await runCmd(() => cmdSend("codex-1", "hello", false, { currentSession: "89-mawjs", receiverInbox: false }));
+
+    expect(exitCode).toBeUndefined();
+    expect(resolveTargetArgCalls[0]?.[0]).toBe("codex-1");
+    expect(resolveTargetArgCalls[0]?.[3]).toBe("89-mawjs");
+    expect(sendKeysCalls).toEqual([{ target: "session:oracle.0", text: "[test-node:sender] hello" }]);
+  });
+
   test("local delivery signs, sends, logs, hooks, captures last line, and emits feed", async () => {
     captureResponses = ["accepted"];
     await runCmd(() => cmdSend("local:session:oracle", "hello"));

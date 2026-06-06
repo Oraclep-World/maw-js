@@ -143,8 +143,15 @@ function resolvePrimingPrompt(member: TeamCharter["members"][number], repoRoot: 
   return readFileSync(path, "utf-8").trim();
 }
 
+function memberPrimingTarget(session: string, member: TeamCharter["members"][number]): string {
+  const identity = memberWindowIdentity(member);
+  if (identity.includes(":")) return identity;
+  return `${session}:${identity}`;
+}
+
 async function primeMember(
   member: TeamCharter["members"][number],
+  session: string,
   repoRoot: string,
   deps: Pick<TeamUpDeps, "cmdSendFn">,
   warnings: string[],
@@ -153,7 +160,7 @@ async function primeMember(
   if (!prompt) return;
   const send = deps.cmdSendFn ?? cmdSend;
   try {
-    await send(memberWindowIdentity(member), prompt, false);
+    await send(memberPrimingTarget(session, member), prompt, false, { currentSession: session });
   } catch (error) {
     warnings.push(`prompt prime failed for ${member.role}: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -235,7 +242,7 @@ export async function cmdTeamUp(team: string, opts: TeamUpOptions = {}, deps: Te
       await wakeMember(targetRepoSlug, item.member, { engine: item.engine, session, repoPath: repoRoot, channels: memberChannels(charter, item.member) }, { cmdWakeFn: deps.cmdWakeFn });
       actions.push({ role: item.role, memberKey, state: item.state, action: "force fresh wake", command });
       await waitForNonShell(item.member, session, tmux, sleep, targetRepoSlug);
-      await primeMember(item.member, repoRoot, deps, warnings);
+      await primeMember(item.member, session, repoRoot, deps, warnings);
     } else if (item.state === "live") {
       actions.push({ role: item.role, memberKey, state: item.state, action: "skip live" });
     } else if (item.state === "dead") {
@@ -244,13 +251,13 @@ export async function cmdTeamUp(team: string, opts: TeamUpOptions = {}, deps: Te
       await tmux.run("send-keys", "-t", item.pane!.paneId, command, "Enter");
       actions.push({ role: item.role, memberKey, state: item.state, action: "resume in place", command });
       await waitForNonShell(item.member, session, tmux, sleep, targetRepoSlug);
-      await primeMember(item.member, repoRoot, deps, warnings);
+      await primeMember(item.member, session, repoRoot, deps, warnings);
     } else {
       const command = engineCommand(item.engine, { resume: false }, config);
       await wakeMember(targetRepoSlug, item.member, { engine: item.engine, session, repoPath: repoRoot, channels: memberChannels(charter, item.member) }, { cmdWakeFn: deps.cmdWakeFn });
       actions.push({ role: item.role, memberKey, state: item.state, action: "fresh wake", command });
       await waitForNonShell(item.member, session, tmux, sleep, targetRepoSlug);
-      await primeMember(item.member, repoRoot, deps, warnings);
+      await primeMember(item.member, session, repoRoot, deps, warnings);
     }
   }
 
