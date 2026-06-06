@@ -315,10 +315,17 @@ function resolveSessionWindowAliasTarget(
 
   if (matches.length > 1) {
     const normalizedQuery = sessionQuery.trim().toLowerCase();
-    const exactUnnumbered = matches.filter((s) =>
-      s.name.trim().replace(/^\d+-/, "").toLowerCase() === normalizedQuery,
+    const exactSessionName = matches.filter((s) =>
+      s.name.trim().toLowerCase() === normalizedQuery,
     );
-    if (exactUnnumbered.length === 1) matches = exactUnnumbered;
+    if (exactSessionName.length === 1) {
+      matches = exactSessionName;
+    } else {
+      const exactUnnumbered = matches.filter((s) =>
+        s.name.trim().replace(/^\d+-/, "").toLowerCase() === normalizedQuery,
+      );
+      if (exactUnnumbered.length === 1) matches = exactUnnumbered;
+    }
   }
 
   if (matches.length > 1) {

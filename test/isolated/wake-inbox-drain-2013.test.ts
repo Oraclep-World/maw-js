@@ -2,9 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { drainWakeInbox, mergeWakeInboxPrompt } from "../src/commands/shared/wake-inbox-drain";
+import { drainWakeInbox, mergeWakeInboxPrompt } from "../../src/commands/shared/wake-inbox-drain";
 
-describe("wake inbox drain (#2056)", () => {
+describe("wake inbox drain (#2013)", () => {
   test("drains unread ψ/inbox markdown into a priming prompt and marks read", () => {
     const repo = mkdtempSync(join(tmpdir(), "maw-wake-drain-"));
     const inbox = join(repo, "ψ", "inbox");
@@ -19,7 +19,7 @@ describe("wake inbox drain (#2056)", () => {
       "read: false",
       "---",
       "",
-      "please review #2056",
+      "please review #2013",
       "",
     ].join("\n"));
     writeFileSync(read, ["---", "from: old", "read: true", "---", "", "old"].join("\n"));
@@ -28,7 +28,7 @@ describe("wake inbox drain (#2056)", () => {
 
     expect(result.count).toBe(1);
     expect(result.prompt).toContain("Unread ψ/inbox messages");
-    expect(result.prompt).toContain("please review #2056");
+    expect(result.prompt).toContain("please review #2013");
     expect(result.prompt).not.toContain("old");
     const updated = readFileSync(unread, "utf-8");
     expect(updated).toContain("read: true");
@@ -83,5 +83,22 @@ test("caps wake inbox prompt bytes and leaves omitted messages unread", () => {
   expect(result.omittedCount).toBe(1);
   expect(result.prompt).toContain("small body");
   expect(readFileSync(small, "utf-8")).toContain("read: true");
+  expect(readFileSync(huge, "utf-8")).toContain("read: false");
+});
+
+
+test("returns an omitted notice prompt when every unread message exceeds the byte budget", () => {
+  const repo = mkdtempSync(join(tmpdir(), "maw-wake-drain-all-omitted-"));
+  const inbox = join(repo, "ψ", "inbox");
+  mkdirSync(inbox, { recursive: true });
+  const huge = join(inbox, "001.md");
+  writeFileSync(huge, ["---", "from: huge", "read: false", "---", "", "x".repeat(1_000)].join("\n"));
+
+  const result = drainWakeInbox(repo, { byteBudget: 400 });
+
+  expect(result.count).toBe(0);
+  expect(result.omittedCount).toBe(1);
+  expect(result.prompt).toContain("Unread ψ/inbox messages omitted");
+  expect(result.prompt).toContain("remain unread");
   expect(readFileSync(huge, "utf-8")).toContain("read: false");
 });
