@@ -458,10 +458,24 @@ export interface DisabledFleetEntry {
 
 export declare function fleetLoadDirsForRead(legacyFleetDir?: string): string[];
 export declare function fleetLoadDirForWrite(): string;
+export declare function loadFleet(dirs?: string[]): FleetSession[];
 export declare function loadFleetCore(dirs?: string[]): FleetSession[];
 export declare function countDisabledFleetFilesCore(dirs?: string[]): number;
 export declare function loadDisabledFleetEntriesCore(dirs?: string[]): DisabledFleetEntry[];
 export declare function loadFleetEntries(dirs?: string[]): FleetEntry[];
+
+export type AttachResolveResult =
+  | { tier: 1; sessionName: string; windowName?: string; ambiguousCandidates?: string[] }
+  | { tier: 2; fleetName: string; ambiguousCandidates?: string[] }
+  | { tier: 3; sessionName: string; node: string; peerUrl: string; sshAlias: string; ambiguousCandidates?: string[] }
+  | { tier: "error"; error: string; hint?: string }
+  | null;
+export declare function resolveAttachTarget(target: string, deps: {
+  listSessions: () => Promise<Array<{ name: string; windows: Array<{ name: string }> }>>;
+  loadFleet: () => Array<{ name: string; windows: Array<{ name: string }> }>;
+  resolvePeer?: (alias: string) => unknown;
+  listRemoteSessions?: () => Promise<unknown[]>;
+}): Promise<AttachResolveResult>;
 
 // --- src/lib/artifacts ---
 

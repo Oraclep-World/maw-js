@@ -94,6 +94,7 @@ export type { OracleEntry, RegistryCache } from "../core/fleet/oracle-registry";
 export {
   fleetDirsForRead as fleetLoadDirsForRead,
   fleetDirForWrite as fleetLoadDirForWrite,
+  loadFleet,
   loadFleet as loadFleetCore,
   countDisabledFleetFiles as countDisabledFleetFilesCore,
   loadDisabledFleetEntries as loadDisabledFleetEntriesCore,
@@ -102,6 +103,8 @@ export {
 export type {
   FleetWindow, FleetSession, FleetEntry, DisabledFleetEntry,
 } from "../core/fleet/fleet-load-core";
+export { resolveAttachTarget } from "../vendor/mpr-plugins/attach/resolve-attach-target";
+export type { ResolveResult as AttachResolveResult } from "../vendor/mpr-plugins/attach/resolve-attach-target";
 export { loadOracleRegistry, getOracleMembers, filterMembers } from "../lib/oracle-members";
 export type { OracleMember, OracleTeamRegistry } from "../lib/oracle-members";
 // Sub-issue 2 of #736 Phase 2 / #836 — unified read-only view across the 5

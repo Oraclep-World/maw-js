@@ -179,6 +179,7 @@ export type { OracleMember, OracleTeamRegistry } from "../../src/lib/oracle-memb
 export {
   fleetDirsForRead as fleetLoadDirsForRead,
   fleetDirForWrite as fleetLoadDirForWrite,
+  loadFleet,
   loadFleet as loadFleetCore,
   countDisabledFleetFiles as countDisabledFleetFilesCore,
   loadDisabledFleetEntries as loadDisabledFleetEntriesCore,
@@ -187,6 +188,8 @@ export {
 export type {
   FleetWindow, FleetSession, FleetEntry, DisabledFleetEntry,
 } from "../../src/core/fleet/fleet-load-core";
+export { resolveAttachTarget } from "../../src/vendor/mpr-plugins/attach/resolve-attach-target";
+export type { ResolveResult as AttachResolveResult } from "../../src/vendor/mpr-plugins/attach/resolve-attach-target";
 
 // ─── src/lib/artifacts ───────────────────────────────────────────────────────
 // Artifact dir/spec/meta/result helpers. Used by `artifact-manager` plugin.

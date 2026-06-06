@@ -1,7 +1,4 @@
-import { loadConfig } from "maw-js/config";
-import { listSessions } from "maw-js/sdk";
-import { loadFleet } from "maw-js/commands/shared/fleet-load";
-import { resolveAttachTarget } from "../attach/resolve-attach-target";
+import { loadConfig, listSessions, loadFleet, resolveAttachTarget } from "maw-js/sdk";
 
 export const FOLLOW_USAGE = "usage: maw follow <pane> [--since=<dur>] [--json] [--grep <pattern>] [--quit-on-idle=<dur>]";
 

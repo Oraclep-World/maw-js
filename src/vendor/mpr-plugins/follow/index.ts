@@ -1,5 +1,5 @@
-import type { InvokeContext, InvokeResult } from "maw-js/plugin/types";
-import { parseFlags } from "maw-js/cli/parse-args";
+import type { InvokeContext, InvokeResult } from "@maw-js/sdk/plugin";
+import { parseFlags } from "@maw-js/sdk/plugin";
 import { cmdFollow, FOLLOW_USAGE, type FollowOptions } from "./impl";
 
 export const command = {
