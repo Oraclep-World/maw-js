@@ -6,6 +6,9 @@ import { join } from "path";
 const budImplPath = join(import.meta.dir, "../../src/vendor/mpr-plugins/bud/impl.ts");
 const sendTextImplPath = join(import.meta.dir, "../../src/vendor/mpr-plugins/send-text/impl.ts");
 
+const realSdk = await import("../../src/sdk");
+const { parseFlags } = await import("../../src/cli/parse-args");
+
 let config: Record<string, any> = {};
 
 let budCalls: Array<{ stem: string; opts: Record<string, any> }> = [];
@@ -37,17 +40,9 @@ mock.module(sendTextImplPath, () => ({
 }));
 
 mock.module("maw-js/sdk", () => ({
-  parseFlags: (args: string[], spec: Record<string, unknown>, skip = 0) => {
-    const out: Record<string, any> = { _: [] };
-    const aliases: Record<string, string> = {};
-    for (const [key, value] of Object.entries(spec)) if (typeof value === "string") aliases[key] = value;
-    for (const tok of args.slice(skip)) {
-      const key = aliases[tok] ?? tok;
-      if (key.startsWith("-")) out[key] = true;
-      else out._.push(tok);
-    }
-    return out;
-  },
+  ...realSdk,
+  loadConfig: () => config,
+  parseFlags,
   listSessions: async () => sessions,
   resolveTarget: (stem: string, cfg: any, sessionRows: any[]) => {
     resolveCalls.push({ stem, config: cfg, sessions: sessionRows });
