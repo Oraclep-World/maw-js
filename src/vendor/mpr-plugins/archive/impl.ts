@@ -1,6 +1,4 @@
-import { hostExec } from "maw-js/sdk";
-import { getGhqRoot } from "maw-js/config/ghq-root";
-import { fleetDirForWrite, loadFleetEntries, type FleetEntry } from "maw-js/commands/shared/fleet-load";
+import { hostExec, getGhqRoot, fleetLoadDirForWrite as fleetDirForWrite, loadFleetEntries, type FleetEntry } from "maw-js/sdk";
 import { cmdSoulSync } from "./internal/soul-sync-impl";
 import { join } from "path";
 import { renameSync } from "fs";
