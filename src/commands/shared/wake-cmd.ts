@@ -30,6 +30,7 @@ import {
   writeWakeBudBirthSignal,
   writeWakeBudLineage,
 } from "./wake-cmd-helpers";
+import { drainWakeInbox, mergeWakeInboxPrompt } from "./wake-inbox-drain";
 export {
   type RehydrateWorktreePlan,
   type SnapshotRestorePlan,
@@ -860,6 +861,13 @@ export async function cmdWake(oracle: string, opts: WakeOptions): Promise<string
     return `${oracle}:list`;
   }
 
+  const drainedInbox = drainWakeInbox(repoPath, { markRead: !opts.dryRun });
+  if (drainedInbox.count > 0) {
+    opts = { ...opts, prompt: mergeWakeInboxPrompt(opts.prompt, drainedInbox.prompt) };
+    const dryRunSuffix = opts.dryRun ? " (dry-run; left unread)" : "";
+    console.log(`\x1b[36m📬\x1b[0m drained ${drainedInbox.count} unread ψ/inbox message${drainedInbox.count === 1 ? "" : "s"} into wake prompt${dryRunSuffix}`);
+  }
+
   const foreignSession = requestedForeignSession;
   let session = foreignSession ? "" : (preResolvedSession || await detectSession(oracle, opts.urlRepoName));
   if (foreignSession) {
@@ -959,9 +967,12 @@ export async function cmdWake(oracle: string, opts: WakeOptions): Promise<string
       hasSession: tmux.hasSession,
     });
     await new Promise(r => setTimeout(r, 300));
-    await retryFreshSessionTmuxStep(session, "launch main window", () =>
-      tmux.sendText(`${session}:${mainWindowName}`, buildWakeCommand(mainWindowName, repoPath, opts))
-    , {
+    await retryFreshSessionTmuxStep(session, "launch main window", () => {
+      const command = buildWakeCommand(mainWindowName, repoPath, opts);
+      if (!opts.prompt) return tmux.sendText(`${session}:${mainWindowName}`, command);
+      const escaped = opts.prompt.replace(/'/g, "'\\''");
+      return tmux.sendText(`${session}:${mainWindowName}`, `${command} -p '${escaped}'`);
+    }, {
       hasSession: tmux.hasSession,
     });
     await wakeSession.waitForEngine(`${session}:${mainWindowName}`, getPaneInfos, isAgentCommand);
