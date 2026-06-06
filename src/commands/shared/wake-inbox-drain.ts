@@ -21,6 +21,11 @@ export interface WakeInboxDrainDeps {
   readFileSync?: typeof readFileSync;
   writeFileSync?: typeof writeFileSync;
   markRead?: boolean;
+  engine?: string;
+}
+
+function isClaudeEngine(engine?: string): boolean {
+  return engine?.trim().toLowerCase() === "claude";
 }
 
 function parseFrontmatter(raw: string): { meta: Record<string, string>; body: string; frontmatter: string | null } {
@@ -82,6 +87,10 @@ export function drainWakeInbox(repoPath: string, deps: WakeInboxDrainDeps = {}):
   const fsReadFile = deps.readFileSync ?? readFileSync;
   const fsWriteFile = deps.writeFileSync ?? writeFileSync;
   const markRead = deps.markRead ?? true;
+  const engine = deps.engine;
+  if (engine !== undefined && !isClaudeEngine(engine)) {
+    return { count: 0, prompt: "", messages: [] };
+  }
   const inboxDir = join(repoPath, "ψ", "inbox");
   if (!fsExists(inboxDir)) return { count: 0, prompt: "", messages: [] };
 

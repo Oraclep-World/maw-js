@@ -890,7 +890,7 @@ export async function cmdWake(oracle: string, opts: WakeOptions): Promise<string
     return `${oracle}:list`;
   }
 
-  const drainedInbox = drainWakeInbox(repoPath, { markRead: !opts.dryRun });
+  const drainedInbox = drainWakeInbox(repoPath, { markRead: !opts.dryRun, engine: opts.engine });
   if (drainedInbox.count > 0) {
     opts = { ...opts, prompt: mergeWakeInboxPrompt(opts.prompt, drainedInbox.prompt) };
     const dryRunSuffix = opts.dryRun ? " (dry-run; left unread)" : "";
