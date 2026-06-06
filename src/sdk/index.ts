@@ -161,6 +161,17 @@ export { registerCommand, matchCommand, listCommands } from "../cli/command-regi
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 export { parseFlags } from "../cli/parse-args";
+export {
+  cmdWorkspaceCreate,
+  cmdWorkspaceJoin,
+  cmdWorkspaceShare,
+  cmdWorkspaceUnshare,
+  cmdWorkspaceLs,
+  cmdWorkspaceAgents,
+  cmdWorkspaceInvite,
+  cmdWorkspaceLeave,
+  cmdWorkspaceStatus,
+} from "../commands/shared/workspace";
 export { ghqFind, ghqList, ghqFindSync, ghqListSync } from "../core/ghq";
 export { UserError, isUserError } from "../core/util/user-error";
 export { sparkline } from "../lib/sparkline";
