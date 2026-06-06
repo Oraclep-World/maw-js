@@ -200,6 +200,16 @@ mock.module(import.meta.resolve("../../src/core/fleet/claude-sessions"), () => (
   },
 }));
 
+
+mock.module(import.meta.resolve("../../src/commands/shared/fleet-load"), () => ({
+  fleetDirsForRead: () => ["/tmp/maw-fleet"],
+  fleetDirForWrite: () => "/tmp/maw-fleet",
+  loadFleet: () => [],
+  loadFleetEntries: () => [],
+  countDisabledFleetFiles: () => 0,
+  loadDisabledFleetEntries: () => [],
+}));
+
 mock.module(import.meta.resolve("../../src/commands/shared/wake-resolve"), () => ({
   resolveOracle: async () => ({ repoPath, repoName, parentDir }),
   findWorktrees: async (...args: any[]) => {
