@@ -76,6 +76,10 @@ mock.module("maw-js/config", () => ({
     if (configError) throw configError;
     return configValue;
   },
+  cfgLimit: (_key: string, fallback: number = 0) => fallback,
+  cfgTimeout: (_key: string, fallback: number = 0) => fallback,
+  cfgInterval: (_key: string, fallback: number = 0) => fallback,
+  cfg: (_key: string, fallback: unknown = undefined) => fallback,
 }));
 
 mock.module("maw-js/commands/shared/fleet-doctor-fixer", () => ({ C }));

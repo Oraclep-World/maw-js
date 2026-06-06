@@ -50,7 +50,11 @@ const sdkMock = {
     calls.push(`snapshot:${trigger}`);
     throw new Error("snapshot unavailable");
   },
+  runSleepLifecycleHooks: async (ctx: { oracle: string; session: string; window: string }) => {
+    calls.push(`hook:${ctx.oracle}:${ctx.session}:${ctx.window}`);
+  },
   FLEET_DIR: "/tmp/maw-coverage-next-vendor-b-fleet",
+  mawMessageLogPath: (...parts: string[]) => ["/tmp/maw-coverage-next-vendor-b-home", ".maw", "messages", ...parts].join("/"),
   tmux: {
     run: async (...args: string[]) => {
       calls.push(`run:${args.join(" ")}`);

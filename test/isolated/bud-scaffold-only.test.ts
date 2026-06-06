@@ -29,9 +29,20 @@ mock.module("maw-js/core/fleet/validate", () => ({
 
 mock.module("maw-js/sdk", () => ({
   FLEET_DIR: "/fleet",
+  loadConfig: () => ({ githubOrg: "TestOrg" }),
   hostExec: async (cmd: string) => {
     calls.push(`hostExec:${cmd}`);
     throw new Error(`hostExec should not be needed in this test: ${cmd}`);
+  },
+  writeSignal: () => {
+    calls.push("writeSignal");
+  },
+  validateNickname: (value: string) => ({ ok: true, value }),
+  writeNickname: () => {
+    calls.push("writeNickname");
+  },
+  setCachedNickname: () => {
+    calls.push("setCachedNickname");
   },
 }));
 

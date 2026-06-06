@@ -12,6 +12,8 @@ let spawnCalls: Array<{ team: string; member: string; opts: unknown }> = [];
 
 mock.module("maw-js/config", () => ({
   loadConfig: () => config,
+  cfgLimit: () => 100,
+  cfgTimeout: () => 100,
 }));
 
 mock.module("maw-js/config/ghq-root", () => ({

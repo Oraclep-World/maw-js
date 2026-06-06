@@ -12,6 +12,7 @@ const peerCalls: Array<{ url: string; body: Record<string, unknown> }> = [];
 let wakeThrow: Error | null = null;
 
 mock.module("maw-js/commands/shared/wake", () => ({
+  fetchIssuePrompt: async (num: number, repo?: string) => `issue-${num}-${repo ?? ""}-prompt`,
   cmdWake: async (oracle: string, opts: Record<string, unknown>) => {
     wakeCalls.push({ oracle, opts });
     console.log(`wake ${oracle}`);
@@ -29,6 +30,7 @@ mock.module("maw-js/commands/shared/wake-target", () => ({
 }));
 
 mock.module("maw-js/commands/shared/wake-resolve", () => ({
+  fetchIssuePrompt: async (num: number, repo?: string) => `issue-${num}-${repo ?? ""}-prompt`,
   fetchGitHubPrompt: async (kind: string, num: number, repo?: string) => {
     fetchPromptCalls.push({ kind, num, repo });
     return `${kind}-${num}-prompt`;

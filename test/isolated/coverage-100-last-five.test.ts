@@ -27,6 +27,11 @@ mock.module("maw-js/config", () => ({
 
 mock.module("maw-js/sdk", () => ({
   listSessions: async () => [],
+  loadConfig: () => ({}),
+  cmdSleep: async () => undefined,
+  cmdWakeAll: async () => undefined,
+  ghqFindSync: () => ghqDir,
+  mawDataPath: (...parts: string[]) => join(homeDir, ".maw", ...parts),
   resolveTarget: () => sdkResolveTarget,
   curlFetch: async () => sdkCurlFetch,
   hostExec: async () => "",
@@ -38,6 +43,7 @@ mock.module("maw-js/sdk", () => ({
   getPaneCommands: async () => [],
   getPaneInfos: async () => [],
   isAgentCommand: () => false,
+  resolveOraclePane: async (target: string) => target,
   withPaneLock: async (fn: () => Promise<unknown>) => fn(),
   splitWindowLocked: async () => "%1",
   tagPane: async () => undefined,

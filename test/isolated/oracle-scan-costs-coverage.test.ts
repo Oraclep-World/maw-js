@@ -64,6 +64,10 @@ mock.module(implListPath, () => ({
 
 mock.module(verbosityPath, () => ({
   isQuiet: () => quietMode,
+  info: (msg: string) => { if (!quietMode) console.error(msg); },
+  warn: (msg: string) => { if (!quietMode) console.error(`⚠ ${msg}`); },
+  error: (msg: string) => { console.error(msg); },
+  verbose: (fn: () => void) => { if (!quietMode) fn(); },
 }));
 
 mock.module(registryTypesPath, () => ({
