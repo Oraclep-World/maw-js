@@ -200,7 +200,7 @@ describe("wake-cmd extra isolated coverage", () => {
     );
 
     expect(result).toBe("54-neo:neo-oracle");
-    expect(logs.join("\n")).toContain("would restore snapshot window: neo-task");
+    expect(logs.join("\n")).toContain("would restore window: neo-task");
     expect(logs.join("\n")).toContain("worktree rehydrate skipped (--main/--solo/--no-rehydrate)");
   });
 

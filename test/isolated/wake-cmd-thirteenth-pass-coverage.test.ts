@@ -499,7 +499,7 @@ describe("wake-cmd thirteenth-pass isolated coverage", () => {
     plannedSnapshotWindows = [{ windowName: "neo-alpha", cwd: "/tmp/neo-oracle.wt-1-alpha", source: "worktree" }];
     result = await captureLogs(() => cmdWake("neo", { repoPath, fromSnapshot: true, dryRun: true }));
     expect(result).toBe("54-neo:neo-oracle");
-    expect(plain()).toContain("would restore snapshot window: neo-alpha");
+    expect(plain()).toContain("would restore window: neo-alpha");
 
     snapshotSessionReturn = null;
     await expect(captureLogs(() => cmdWake("neo", { repoPath, fromSnapshot: true })))
@@ -513,7 +513,7 @@ describe("wake-cmd thirteenth-pass isolated coverage", () => {
     const result = await captureLogs(() => cmdWake("neo", { repoPath, dryRun: true }));
 
     expect(result).toBe("54-neo:neo-oracle");
-    expect(plain()).toContain("would respawn: neo-docs");
+    expect(plain()).toContain("would restore window: neo-docs");
     expect(plain()).toContain("/tmp/neo-oracle.wt-5-docs");
   });
 
@@ -568,7 +568,7 @@ describe("wake-cmd thirteenth-pass isolated coverage", () => {
     const result = await captureLogs(() => cmdWake("neo", { repoPath, dryRun: true }));
 
     expect(result).toBe("54-neo:neo-oracle");
-    expect(plain()).toContain("would respawn: neo-docs");
+    expect(plain()).toContain("would restore window: neo-docs");
   });
 
   test("missing session creation registers new agents and reports team auto-config", async () => {
@@ -664,7 +664,7 @@ describe("wake-cmd thirteenth-pass isolated coverage", () => {
       text: "cd /tmp/neo-oracle.wt-2-beta && claude --agent neo-beta",
     });
     expect(snapshots).toEqual(["wake"]);
-    expect(plain()).toContain("snapshot window: neo-restored");
+    expect(plain()).toContain("window: neo-restored");
     expect(plain()).toContain("1 window(s) reordered");
   });
 

@@ -770,8 +770,8 @@ describe("cmdWake main-suite coverage", () => {
     expect(result).toBe("mawjs:dry-run");
     expect(rendered).toContain("would create session");
     expect(rendered).toContain("10-mawjs");
-    expect(rendered).toContain("would respawn: mawjs-alpha");
-    expect(rendered).toContain("would respawn: mawjs-beta");
+    expect(rendered).toContain("would restore window: mawjs-alpha");
+    expect(rendered).toContain("would restore window: mawjs-beta");
     expect(newSessionCalls).toHaveLength(0);
     expect(newWindowCalls).toHaveLength(0);
     expect(sendTextCalls).toHaveLength(0);
