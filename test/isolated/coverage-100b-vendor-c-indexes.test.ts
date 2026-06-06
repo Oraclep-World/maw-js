@@ -71,6 +71,20 @@ mock.module("maw-js/config", () => ({
   buildCommandInDir: () => "cmd",
   getEnvVars: () => ({}),
 }));
+
+mock.module(import.meta.resolve("../../src/config"), () => ({
+  loadConfig: () => ({ host: "local", node: "local", disabledPlugins: [], psiPath: "/tmp/maw-coverage-100b-psi" }),
+  loadConfigWithProvenance: () => ({ config: { host: "local", node: "local", disabledPlugins: [], psiPath: "/tmp/maw-coverage-100b-psi" }, sources: [] }),
+  saveConfig: () => undefined,
+  cfgTimeout: () => 1000,
+  cfgLimit: () => 1,
+  cfgInterval: () => 1000,
+  cfg: (_key: string, fallback: unknown) => fallback,
+  D: {},
+  buildCommand: () => "cmd",
+  buildCommandInDir: () => "cmd",
+  getEnvVars: () => ({}),
+}));
 mock.module("maw-js/commands/shared/comm-send", () => ({
   resolveOraclePane: async (target: string) => `pane:${target}`,
   checkPaneIdle: async () => ({ idle: true }),
