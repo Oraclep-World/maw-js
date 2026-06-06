@@ -1,7 +1,4 @@
-import { listSessions, hostExec } from "maw-js/sdk";
-import { tmux } from "maw-js/sdk";
-import { loadConfig } from "maw-js/config";
-import type { Session } from "maw-js/sdk";
+import { listSessions, loadConfig, tmux, type Session } from "maw-js/sdk";
 
 export interface OverviewTarget {
   session: string;
