@@ -426,12 +426,15 @@ async function resolveBareLocalTarget(
  *   into the live pane. Normal sends now always inject by default.
  * - `from` (#1889): explicit user-facing sender override, `<node>:<oracle>`,
  *   used for SSH relays where auto local identity would impersonate the host.
+ * - `currentSession` (#2134): caller-known tmux session used to scope bare
+ *   target resolution before cross-session matching.
  */
 export interface CmdSendOptions {
   approve?: boolean;
   trust?: boolean;
   inboxOnly?: boolean;
   from?: string;
+  currentSession?: string;
   receiverInbox?: ReceiverInboxWriter | false;
   /**
    * #1907 — opt out of post-send verify-submit retry. Default behaviour
@@ -597,7 +600,7 @@ export async function cmdSend(
   }
 
   let sessions = await listSessions();
-  const currentSession = await currentTmuxSessionName();
+  const currentSession = opts.currentSession?.trim() || await currentTmuxSessionName();
   let bareResolution = await resolveBareLocalTarget(query, config, sessions, currentSession);
 
   // --- #736 Phase 1.2 + #791: auto-wake fleet-known targets (parity with maw view) ---

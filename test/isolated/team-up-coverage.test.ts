@@ -251,8 +251,8 @@ agents:
       ["soul-brews-studio/maw-js", { wt: "claude48", engine: "claude48", session: "charter-session", repoPath: root, channels: true }],
     ]);
     expect(sends).toEqual([
-      ["codex", "inline prompt", false],
-      ["claude48", "file prompt", false],
+      ["charter-session:codex", "inline prompt", false, { currentSession: "charter-session" }],
+      ["charter-session:claude48", "file prompt", false, { currentSession: "charter-session" }],
     ]);
   });
 
