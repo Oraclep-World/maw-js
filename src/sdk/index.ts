@@ -225,3 +225,6 @@ export function definePlugin(config: PluginConfig): PluginConfig {
   if (typeof config.handler !== "function") throw new Error("definePlugin: handler is required");
   return config;
 }
+
+// ─── Terminal Formatting ────────────────────────────────────────────────────
+export { tlink } from "../core/util/terminal";
