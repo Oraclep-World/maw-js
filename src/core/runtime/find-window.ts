@@ -70,9 +70,20 @@ export function findWindow(sessions: Session[], query: string): string | null {
     const paneSuffix = paneMatch ? `.${paneMatch[2]}` : "";
     const sess = matchSession(sessions, sessPart, true);
     if (sess) {
-      // Empty window part → return session's first window
+      // Empty window part → return session's first window.
       if (!winPart) {
         if (sess.windows.length > 0) return `${sess.name}:${sess.windows[0].index}`;
+      } else if (/^\d+$/.test(winPart)) {
+        // #2139: explicit `session:number(.pane)` is a tmux window_index,
+        // not a display ordinal. Resolve it against the observed session list
+        // and canonicalize the session alias before any raw tmux fallback can
+        // reinterpret the target and land on the adjacent window.
+        const windowIndex = Number(winPart);
+        const win = sess.windows.find((w) => w.index === windowIndex);
+        if (win) return `${sess.name}:${win.index}${paneSuffix}`;
+        // Preserve findWindow's historical low-level behavior for unknown
+        // literal tmux targets; resolveTarget validates these before calling
+        // findWindow on the `maw hey` path.
       } else {
         for (const w of sess.windows) {
           if (w.name.toLowerCase().includes(winPart)) return `${sess.name}:${w.index}${paneSuffix}`;

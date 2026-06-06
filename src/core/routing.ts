@@ -98,17 +98,18 @@ export function resolveTarget(
     if (sessionAliasResult) return sessionAliasResult;
   }
 
+  // A forwarded /api/send target such as `volt-oracle:1` is a local
+  // session/window alias on the receiving node, not a remote node named
+  // `volt-oracle`. Resolve and validate that explicit tmux shape before
+  // findWindow's legacy raw fallback or node-prefix routing (#2139).
+  const localSessionWindowAlias = resolveSessionWindowAliasTarget(query, writable, "local");
+  if (localSessionWindowAlias) return localSessionWindowAlias;
+
   // --- Step 1: Local findWindow ---
   const localTarget = findWindow(writable, query);
   if (localTarget) {
     return { type: "local", target: localTarget };
   }
-
-  // A forwarded /api/send target such as `volt-oracle:1` is a local
-  // session/window alias on the receiving node, not a remote node named
-  // `volt-oracle`. Try that explicit tmux shape before node-prefix routing.
-  const localSessionWindowAlias = resolveSessionWindowAliasTarget(query, writable, "local");
-  if (localSessionWindowAlias) return localSessionWindowAlias;
 
   // --- Step 2: Node:prefix syntax (e.g. "mba:homekeeper") ---
   if (query.includes(":") && !query.includes("/")) {
