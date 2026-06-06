@@ -15,6 +15,7 @@ import { Tmux } from "../core/transport/tmux";
 import { pushFeedEvent } from "./feed";
 import { buildMessageLifecycleFeedEvent, type MessageLifecycleInput } from "../lib/message-events";
 import { defaultReceiverInboxWriter, type ReceiverInboxResult, type ReceiverInboxWriter } from "../commands/shared/receiver-inbox";
+import { checkBusyGuard, queueForDispatch } from "../core/agent-status-guard";
 import type { Session } from "../core/transport/ssh";
 
 type Config = ReturnType<typeof loadConfig>;
@@ -470,6 +471,12 @@ export function createSessionsApi(deps: SessionsApiDeps = {}) {
       if (resolved?.type === "local" || resolved?.type === "self-node") {
         const live = await verifyDeliverableTarget(resolved.target);
         if (!live.ok) return queueOrFail(resolved.target, live.reason);
+        // Phase 2 busy guard — queue for auto-delivery if target is actively working
+        const guard = await checkBusyGuard(target);
+        if (guard.busy && !inboxOnly) {
+          queueForDispatch({ from: messageFrom, to: target, target: resolved.target, message });
+          return queueOrFail(resolved.target, `target '${guard.oracle}' is busy; queued for auto-delivery`);
+        }
         try {
           if (inboxOnly) return queueOrFail(resolved.target, "--inbox requested; pane injection skipped");
           await d.sendKeys(resolved.target, message);

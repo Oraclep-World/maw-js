@@ -21,6 +21,7 @@ import {
   resolveBareHeyByLocatePath,
   type HeyLocateResolution,
 } from "./hey-locate-resolution";
+import { checkBusyGuard, queueForDispatch } from "../../core/agent-status-guard";
 
 /**
  * Resolve a `session:window` target to a specific pane running an agent
@@ -848,6 +849,16 @@ export async function cmdSend(
       console.error(`\x1b[31merror\x1b[0m: --inbox requested but receiver inbox is unavailable for ${target}${reason}`);
       process.exit(1);
     }
+    // Phase 2 busy guard — queue to inbox + dispatch queue if target is actively working
+    const guard = await checkBusyGuard(query);
+    if (guard.busy) {
+      queueForDispatch({ from: `${config.node ?? "local"}:${senderName}`, to: query, target, message: outboundMessage });
+      const inbox = await writeReceiverInbox(target);
+      if (logQueuedInbox(inbox, target, `target '${guard.oracle}' is busy; queued for auto-delivery`)) return;
+      console.log(`\x1b[33mqueued\x1b[0m target '${guard.oracle}' is busy — will auto-deliver when idle`);
+      return;
+    }
+
     // #1967: the receiver inbox is the durable delivery guarantee; pane
     // injection is only the live wake-up. Persist first so a tmux race cannot
     // silently drop the message before it reaches ψ/inbox.
