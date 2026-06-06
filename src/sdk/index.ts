@@ -137,6 +137,9 @@ export { registerCommand, matchCommand, listCommands } from "../cli/command-regi
 
 export { parseFlags } from "../cli/parse-args";
 
+// Plugin extraction helpers for tab-like command surfaces.
+export { cmdPeek, cmdSend } from "../commands/shared/comm";
+
 // ─── Transport Router ────────────────────────────────────────────────────────
 
 export {
