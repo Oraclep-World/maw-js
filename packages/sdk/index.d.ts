@@ -235,6 +235,9 @@ export declare function cmdPeek(query?: string): Promise<void>;
 /** Send a message to an oracle/window target. */
 export declare function cmdSend(target: string, message: string, force?: boolean): Promise<void>;
 
+/** Resolve an oracle/window target to a concrete tmux pane. */
+export declare function resolveOraclePane(target: string): Promise<string>;
+
 // --- src/config ---
 
 /** Loaded operator config — opaque to plugins; consume via `cfg*` accessors. */

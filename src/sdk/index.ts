@@ -165,6 +165,7 @@ export { tlink } from "../core/util/terminal";
 
 // Plugin extraction helpers for tab-like command surfaces.
 export { cmdPeek, cmdSend } from "../commands/shared/comm";
+export { resolveOraclePane } from "../commands/shared/comm-send";
 
 // ─── Transport Router ────────────────────────────────────────────────────────
 
