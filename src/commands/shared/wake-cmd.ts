@@ -29,6 +29,7 @@ import { UserError } from "../../core/util/user-error";
 import {
   type RehydrateWorktreePlan,
   type SnapshotRestorePlan,
+  filterMergedWorktreesForRehydrate,
   findWakeSnapshotSession,
   planRehydrateWorktreeWindows,
   planSnapshotRestoreWindows,
@@ -43,6 +44,7 @@ export {
   type SnapshotRestorePlan,
   type WakeBudLineageInput,
   buildWakeBudLineage,
+  filterMergedWorktreesForRehydrate,
   findWakeSnapshotSession,
   planRehydrateWorktreeWindows,
   planSnapshotRestoreWindows,
@@ -1069,7 +1071,8 @@ export async function cmdWake(oracle: string, opts: WakeOptions): Promise<string
     }
 
     const liveTileRoles = session ? await getLiveTileRoles(session) : new Set<string>();
-    const planned = planRehydrateWorktreeWindows(oracle, allWt, existingWindows, liveTileRoles);
+    const rehydratableWt = await filterMergedWorktreesForRehydrate(allWt, { hostExec, baseBranch: "alpha" });
+    const planned = planRehydrateWorktreeWindows(oracle, rehydratableWt, existingWindows, liveTileRoles);
     if (planned.length === 0) {
       console.log(`\x1b[90m↻ would respawn: none\x1b[0m`);
       logAgentsRehydrationSource(0, allWt);
@@ -1155,7 +1158,8 @@ export async function cmdWake(oracle: string, opts: WakeOptions): Promise<string
 
     if (!foreignSession && !opts.task && !opts.wt && !opts.noRehydrate) {
       const allWt = await findWorktrees(parentDir, repoName);
-      const plan = planRehydrateWorktreeWindows(oracle, allWt, [...existingWindows]);
+      const rehydratableWt = await filterMergedWorktreesForRehydrate(allWt, { hostExec, baseBranch: "alpha" });
+      const plan = planRehydrateWorktreeWindows(oracle, rehydratableWt, [...existingWindows]);
       logAgentsRehydrationSource(plan.length, allWt);
       if (plan.length > 0) {
         console.log(`\x1b[36m↻\x1b[0m rehydrating from agents/ folder:`);
@@ -1203,7 +1207,8 @@ export async function cmdWake(oracle: string, opts: WakeOptions): Promise<string
       if (allWt.length > 0) {
         const existingWindows = [...preExistingWindows];
         const liveTileRoles = await getLiveTileRoles(session);
-        const plan = planRehydrateWorktreeWindows(oracle, allWt, existingWindows, liveTileRoles);
+        const rehydratableWt = await filterMergedWorktreesForRehydrate(allWt, { hostExec, baseBranch: "alpha" });
+        const plan = planRehydrateWorktreeWindows(oracle, rehydratableWt, existingWindows, liveTileRoles);
         logAgentsRehydrationSource(plan.length, allWt);
         if (plan.length > 0) {
           console.log(`\x1b[36m↻\x1b[0m rehydrating from agents/ folder:`);
