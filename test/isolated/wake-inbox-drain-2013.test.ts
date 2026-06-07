@@ -4,7 +4,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { drainWakeInbox, mergeWakeInboxPrompt } from "../../src/commands/shared/wake-inbox-drain";
 
-describe("wake inbox drain (#2013)", () => {
+describe("wake inbox drain (#2390)", () => {
   test("reports unread ψ/inbox count without injecting bodies or marking read", () => {
     const repo = mkdtempSync(join(tmpdir(), "maw-wake-drain-"));
     const inbox = join(repo, "ψ", "inbox");
@@ -36,9 +36,8 @@ describe("wake inbox drain (#2013)", () => {
   });
 
   test("merges drained inbox after an explicit wake prompt", () => {
-    const notification = "You have 2 unread messages in inbox. Run maw inbox --unread to review.";
-    expect(mergeWakeInboxPrompt("continue task", notification))
-      .toBe(`continue task\n\n${notification}`);
+    expect(mergeWakeInboxPrompt("continue task", "You have 1 unread messages in inbox. Run maw inbox --unread to review."))
+      .toBe("continue task\n\nYou have 1 unread messages in inbox. Run maw inbox --unread to review.");
   });
 
   test("skips draining inbox for non-Claude engines", () => {
@@ -68,7 +67,7 @@ describe("wake inbox drain (#2013)", () => {
   });
 });
 
-test("caps wake inbox prompt bytes and leaves omitted messages unread", () => {
+test("counts all unread messages without body-size omissions", () => {
   const repo = mkdtempSync(join(tmpdir(), "maw-wake-drain-cap-"));
   const inbox = join(repo, "ψ", "inbox");
   mkdirSync(inbox, { recursive: true });
@@ -84,24 +83,22 @@ test("caps wake inbox prompt bytes and leaves omitted messages unread", () => {
   expect(result.omittedCount).toBe(0);
   expect(result.prompt).toBe("You have 2 unread messages in inbox. Run maw inbox --unread to review.");
   expect(result.prompt).not.toContain("small body");
-  expect(result.prompt).not.toContain("x".repeat(100));
+  expect(result.prompt).not.toContain("xxx");
   expect(readFileSync(small, "utf-8")).toContain("read: false");
   expect(readFileSync(huge, "utf-8")).toContain("read: false");
 });
 
-
-test("returns a count notification even when unread message bodies are huge", () => {
-  const repo = mkdtempSync(join(tmpdir(), "maw-wake-drain-all-omitted-"));
+test("returns an empty prompt when the one-line unread notice exceeds the byte budget", () => {
+  const repo = mkdtempSync(join(tmpdir(), "maw-wake-drain-tight-budget-"));
   const inbox = join(repo, "ψ", "inbox");
   mkdirSync(inbox, { recursive: true });
-  const huge = join(inbox, "001.md");
-  writeFileSync(huge, ["---", "from: huge", "read: false", "---", "", "x".repeat(1_000)].join("\n"));
+  const unread = join(inbox, "001.md");
+  writeFileSync(unread, ["---", "from: huge", "read: false", "---", "", "x".repeat(1_000)].join("\n"));
 
-  const result = drainWakeInbox(repo, { byteBudget: 400 });
+  const result = drainWakeInbox(repo, { byteBudget: 10 });
 
   expect(result.count).toBe(1);
   expect(result.omittedCount).toBe(0);
-  expect(result.prompt).toBe("You have 1 unread messages in inbox. Run maw inbox --unread to review.");
-  expect(result.prompt).not.toContain("x".repeat(100));
-  expect(readFileSync(huge, "utf-8")).toContain("read: false");
+  expect(result.prompt).toBe("");
+  expect(readFileSync(unread, "utf-8")).toContain("read: false");
 });

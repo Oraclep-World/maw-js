@@ -32,6 +32,10 @@ export interface WakeInboxDrainDeps {
 
 export const DEFAULT_WAKE_INBOX_BYTE_BUDGET = 64 * 1024;
 
+function utf8Bytes(value: string): number {
+  return Buffer.byteLength(value, "utf-8");
+}
+
 function parseFrontmatter(raw: string): { meta: Record<string, string>; body: string; frontmatter: string | null } {
   if (!raw.startsWith("---\n")) return { meta: {}, body: raw.trim(), frontmatter: null };
   const end = raw.indexOf("\n---", 4);
@@ -62,10 +66,10 @@ function markFrontmatterRead(raw: string, timestamp: string): string {
   return fm + raw.slice(end + "\n---".length);
 }
 
-export function formatWakeInboxPrompt(countOrMessages: number | WakeInboxMessage[]): string {
-  const count = Array.isArray(countOrMessages) ? countOrMessages.length : countOrMessages;
-  if (count <= 0) return "";
-  return `You have ${count} unread messages in inbox. Run maw inbox --unread to review.`;
+export function formatWakeInboxPrompt(messages: WakeInboxMessage[], omittedCount = 0): string {
+  const unreadCount = messages.length + omittedCount;
+  if (unreadCount <= 0) return "";
+  return `You have ${unreadCount} unread messages in inbox. Run maw inbox --unread to review.`;
 }
 
 export function mergeWakeInboxPrompt(existingPrompt: string | undefined, inboxPrompt: string): string | undefined {
@@ -90,6 +94,7 @@ export function drainWakeInbox(repoPath: string, deps: WakeInboxDrainDeps = {}):
   if (!fsExists(inboxDir)) return { count: 0, prompt: "", messages: [], omittedCount: 0, byteBudget };
 
   const messages: WakeInboxMessage[] = [];
+  let omittedCount = 0;
   for (const filename of fsReadDir(inboxDir).filter((name) => name.endsWith(".md")).sort()) {
     const path = join(inboxDir, filename);
     let raw: string;
@@ -100,13 +105,14 @@ export function drainWakeInbox(repoPath: string, deps: WakeInboxDrainDeps = {}):
     }
     const parsed = parseFrontmatter(raw);
     if (!isUnread(parsed.meta)) continue;
-    messages.push({
+    const message = {
       path,
       filename,
       from: parsed.meta.from ?? "",
       timestamp: parsed.meta.timestamp ?? "",
-      body: "",
-    });
+      body: parsed.body,
+    };
+    messages.push(message);
     if (markRead) {
       try {
         fsWriteFile(path, markFrontmatterRead(raw, new Date().toISOString()));
@@ -116,11 +122,7 @@ export function drainWakeInbox(repoPath: string, deps: WakeInboxDrainDeps = {}):
     }
   }
 
-  return {
-    count: messages.length,
-    messages,
-    omittedCount: 0,
-    byteBudget,
-    prompt: formatWakeInboxPrompt(messages.length),
-  };
+  let prompt = formatWakeInboxPrompt(messages, omittedCount);
+  if (utf8Bytes(prompt) > byteBudget) prompt = "";
+  return { count: messages.length, messages, omittedCount, byteBudget, prompt };
 }
