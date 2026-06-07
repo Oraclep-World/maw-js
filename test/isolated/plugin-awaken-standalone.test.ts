@@ -47,6 +47,21 @@ mockBoth(sendTextImplPath, () => ({
   },
   cmdSendText: async (opts: { target: string; text: string }) => {
     sendTextCalls.push(opts);
+    const sdk = await import("maw-js/sdk");
+    const resolved = sdk.resolveTarget?.(opts.target);
+    if (resolved?.type === "peer") {
+      await sdk.curlFetch?.(`${resolved.peerUrl}/api/pane-keys`, {
+        method: "POST",
+        body: JSON.stringify({ target: resolved.target, text: opts.text, enter: true }),
+      });
+      return;
+    }
+    if (sdk.Tmux && sdk.resolveOraclePane) {
+      const pane = await sdk.resolveOraclePane(resolved?.target ?? opts.target);
+      const tmux = new sdk.Tmux();
+      if (typeof tmux.sendText === "function") await tmux.sendText(pane, opts.text);
+      console.log(`sent → ${pane}: ${opts.text}`);
+    }
   },
 }));
 
@@ -54,6 +69,10 @@ mock.module("maw-js/sdk", () => ({
   ...realSdk,
   listSessions: async () => sessions,
   resolveTarget: () => resolveResult,
+  resolveOraclePane: async (target: string) => target,
+  Tmux: class {
+    async sendText(_pane: string, _text: string) {}
+  },
   getPaneCommand: async () => paneCommands.shift() ?? "codex",
   isAgentCommand: (command: string | null | undefined) => ["codex", "claude"].includes(String(command ?? "")),
 }));
