@@ -29,6 +29,9 @@ import { getRuntimeVersionLabel } from "./runtime/build-info";
 import { ServeRouteRegistry } from "./serve-route-registry";
 import { ServeWsRegistry } from "./serve-ws-registry";
 import { corsHeaders, handleCorsOptions } from "./serve-cors";
+import { createViews, serve as registerServeViews } from "../vendor/mpr-plugins/serve-views/index.ts";
+import { serve as registerServeWs } from "../vendor/mpr-plugins/serve-ws/index.ts";
+export { createViews };
 
 // --- Version info (computed once at startup) ---
 
@@ -86,14 +89,7 @@ export function servePortInUseInstructions(port: number, hostname: string): stri
 // Bind heuristic lives in ./bind-host.ts so tests can import it without
 // pulling in server.ts's module-level auto-start side effects.
 import { resolveBindHost } from "./bind-host";
-
-const serveViewsPlugin = await import(`../vendor/mpr-plugins/serve-views/index.ts?server=${encodeURIComponent(import.meta.url)}`);
-const registerServeViews = serveViewsPlugin.serve;
-export const createViews = serveViewsPlugin.createViews;
-export const views = serveViewsPlugin.createViews();
-
-const serveWsPlugin = await import(`../vendor/mpr-plugins/serve-ws/index.ts?server=${encodeURIComponent(import.meta.url)}`);
-const registerServeWs = serveWsPlugin.serve;
+export const views = createViews();
 
 const startupPeerWarningsLogged = new Set<string>();
 
