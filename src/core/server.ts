@@ -22,7 +22,7 @@ import { getRuntimeVersionLabel } from "./runtime/build-info";
 import { ServeRouteRegistry } from "./serve-route-registry";
 import { ServeWsRegistry } from "./serve-ws-registry";
 import { corsHeaders, handleCorsOptions } from "./serve-cors";
-import { createViews, serve as registerServeViews } from "../vendor/mpr-plugins/serve-views/index.ts";
+import { createViews } from "../vendor/mpr-plugins/serve-views/index.ts";
 import { serve as registerServeWs } from "../vendor/mpr-plugins/serve-ws/index.ts";
 export { createViews };
 
@@ -96,7 +96,6 @@ export async function startServer(port = +(process.env.MAW_PORT || loadConfig().
   registerServeWs({
     ws: serveWs,
     engine,
-    plugin: { name: "serve-ws" },
   });
 
   const HTTP_URL = `http://localhost:${port}`;
