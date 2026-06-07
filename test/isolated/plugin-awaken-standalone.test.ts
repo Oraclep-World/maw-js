@@ -1,15 +1,17 @@
-import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { loadManifestFromDir } from "../../src/plugin/manifest-load";
 import { invokePlugin } from "../../src/plugin/registry-invoke";
 import type { LoadedPlugin } from "../../src/plugin/types";
+const realSdk = await import("../../src/sdk/index.ts");
+afterAll(() => { mock.restore(); });
 
 const ROOT = new URL("../..", import.meta.url).pathname;
 const pluginDir = join(ROOT, "src/vendor/mpr-plugins/awaken");
-const budImplPath = join(ROOT, "src/vendor/mpr-plugins/bud/impl.ts");
-const sendTextImplPath = join(ROOT, "src/vendor/mpr-plugins/send-text/impl.ts");
+const budImplPath = "../../src/vendor/mpr-plugins/bud/impl";
+const sendTextImplPath = "../../src/vendor/mpr-plugins/send-text/impl";
 
 let budCalls: Array<{ name: string; opts: Record<string, unknown> }>;
 let sendTextCalls: Array<{ target: string; text: string }>;
@@ -18,19 +20,38 @@ let paneCommands: string[];
 let resolveResult: unknown;
 let config: Record<string, unknown>;
 
-mock.module(budImplPath, () => ({
+function mockBoth(spec: string, factory: () => Record<string, unknown>) {
+  mock.module(import.meta.resolve(spec), factory);
+  mock.module(import.meta.resolve(`${spec}.ts`), factory);
+}
+
+mockBoth(budImplPath, () => ({
   cmdBud: async (name: string, opts: Record<string, unknown>) => {
     budCalls.push({ name, opts });
+    if (opts.root && opts.dryRun) {
+      const org = String(opts.org ?? "Soul-Brews-Studio");
+      console.log(`🌱 Root Bud: ${name} → ${org}/${name}-oracle`);
+      console.log(`[dry-run] would create repo: ${org}/${name}-oracle`);
+      if (opts.nickname) console.log(`[dry-run] would write nickname: ${opts.nickname}`);
+    }
   },
 }));
 
-mock.module(sendTextImplPath, () => ({
+mockBoth(sendTextImplPath, () => ({
+  parseSendTextArgs: (args: string[]) => {
+    const target = args[0];
+    const text = args.slice(1).join(" ");
+    if (!target) throw new Error("target is required");
+    if (!text) throw new Error("text is required");
+    return { target, text };
+  },
   cmdSendText: async (opts: { target: string; text: string }) => {
     sendTextCalls.push(opts);
   },
 }));
 
 mock.module("maw-js/sdk", () => ({
+  ...realSdk,
   listSessions: async () => sessions,
   resolveTarget: () => resolveResult,
   getPaneCommand: async () => paneCommands.shift() ?? "codex",
