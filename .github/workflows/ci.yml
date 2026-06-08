@@ -10,6 +10,7 @@ jobs:
   plugin-coverage-gate:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
         with:
@@ -24,6 +25,7 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     needs: plugin-coverage-gate
     if: always() && (needs.plugin-coverage-gate.result == 'success' || needs.plugin-coverage-gate.result == 'skipped')
     strategy:
@@ -93,6 +95,7 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     needs: test
     steps:
       - uses: actions/checkout@v6
