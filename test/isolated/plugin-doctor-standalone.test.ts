@@ -176,4 +176,26 @@ describe("doctor plugin standalone boundary (#2328)", () => {
     expect(invalidated).toBe(1);
     expect(stripAnsi(result.output)).toContain("manifest:cross-source");
   });
+
+  test("hub json mode reports fix commands and before/after state", async () => {
+    mkdirSync(tmpPath("data", "workspaces"), { recursive: true });
+    writeFileSync(tmpPath("data", "workspaces", "valid.json"), JSON.stringify({ url: "https://hub.example.test" }));
+    writeFileSync(tmpPath("state", "doctor-last.json"), JSON.stringify({
+      timestamp: "2026-06-08T00:00:00.000Z",
+      checks: { hub: "ok" },
+    }));
+
+    const result = await doctorHandler({ source: "cli", args: ["hub", "--json", "--no-prompt"] } as any);
+
+    expect(result.ok).toBe(false);
+    const parsed = JSON.parse(stripAnsi(result.output));
+    expect(parsed.checks[0]).toMatchObject({
+      name: "hub",
+      ok: false,
+      severity: "warn",
+      fix: [expect.stringContaining("rm ")],
+    });
+    expect(parsed.comparison).toContainEqual({ name: "hub", before: "ok", after: "issue", status: "regressed" });
+    expect(JSON.parse(readFileSync(tmpPath("state", "doctor-last.json"), "utf8")).checks.hub).toBe("issue");
+  });
 });
