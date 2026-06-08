@@ -10,6 +10,9 @@ import { normalizeTarget } from "../../core/matcher/normalize-target";
 import { assertValidOracleName } from "../../core/fleet/validate";
 import { canonicalSessionName } from "../../core/fleet/session-name";
 import { resolveOracle, findWorktrees, findReusableWorktreeBySlug, getSessionMap, resolveFleetSession, detectSession, setSessionEnv, sanitizeBranchName } from "./wake-resolve";
+import { stripOracleRepoSuffix, bringCwdMetadata, deriveOracleFromCwd } from "./wake-cwd";
+// #2569 — re-export so the wake barrel surface still exposes deriveOracleFromCwd.
+export { deriveOracleFromCwd } from "./wake-cwd";
 import * as wakeSession from "./wake-session";
 import { maybeOpenWindow, maybeSplit } from "./wake-maybe-split";
 import { runWakeLifecycleHooks } from "../../plugin/lifecycle";
@@ -137,31 +140,8 @@ type BringWindowLookupCandidate = BringWindowCandidate & {
   aliases: string[];
 };
 
-function stripOracleRepoSuffix(name: string): string | null {
-  return name.toLowerCase().endsWith("-oracle") ? name.slice(0, -"-oracle".length) : null;
-}
-
-function bringCwdMetadata(cwd: string | undefined): { oracle?: string; worktree?: string } {
-  const parts = cwd ? resolve(cwd).split(/[\\/]+/).filter(Boolean) : [];
-  const agentsIdx = parts.lastIndexOf("agents");
-  if (agentsIdx > 0 && parts[agentsIdx + 1]) {
-    return {
-      oracle: stripOracleRepoSuffix(parts[agentsIdx - 1] ?? "") ?? undefined,
-      worktree: parts[agentsIdx + 1],
-    };
-  }
-
-  for (const part of parts.slice().reverse()) {
-    const worktreeMarker = part.indexOf(".wt-");
-    if (worktreeMarker > 0) {
-      const oracle = stripOracleRepoSuffix(part.slice(0, worktreeMarker)) ?? undefined;
-      return { oracle, worktree: part.slice(worktreeMarker + ".wt-".length) || undefined };
-    }
-    const oracle = stripOracleRepoSuffix(part);
-    if (oracle) return { oracle };
-  }
-  return {};
-}
+// #2569 — cwd → oracle/worktree derivation lives in ./wake-cwd (deps-free so it
+// is unit-testable without the sdk/config mock cascade).
 
 function uniqueNonEmpty(values: string[]): string[] {
   return [...new Set(values.map(v => v.trim()).filter(Boolean))];
@@ -779,12 +759,13 @@ async function resolveWakeFleetSessionRepo(meta: WakeFleetSessionMetadata): Prom
     return { repoPath: existing, repoName: existing.split("/").pop()!, parentDir: existing.replace(/\/[^/]+$/, "") };
   }
 
-  console.log(`\x1b[36m🌱\x1b[0m ${meta.session} pinned in fleet → github.com/${meta.repo} — cloning to ghq...`);
+  const cloneSlug = meta.repo.replace(/^github\.com\//i, "");
+  console.log(`\x1b[36m🌱\x1b[0m ${meta.session} pinned in fleet → github.com/${cloneSlug} — cloning to ghq...`);
   try {
-    await hostExec(`ghq get -u 'github.com/${meta.repo}'`);
+    await hostExec(`ghq get -u 'github.com/${cloneSlug}'`);
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
-    console.error(`\x1b[33m⚠\x1b[0m fleet-pinned ${meta.repo} clone/update failed: ${msg.split("\n")[0]}`);
+    console.error(`\x1b[33m⚠\x1b[0m fleet-pinned ${cloneSlug} clone/update failed: ${msg.split("\n")[0]}`);
   }
   const cloned = await ghqFind(`/${meta.repo}`) || await ghqFind(`/${repoStem}`);
   if (cloned) {
@@ -855,6 +836,20 @@ export async function cmdWake(oracle: string, opts: WakeOptions): Promise<string
   // Canonicalize the bare name before any lookup — strips trailing `/`, `/.git`, `/.git/`
   // so `maw wake token-oracle/` (tab-completion artifact) resolves the same as `token-oracle`.
   oracle = normalizeTarget(oracle);
+
+  // #2569 — zero-arg wake: `maw wake` (or `maw wake .`) inside an oracle repo
+  // derives the oracle from the current directory, then runs the normal flow.
+  if (!oracle || oracle === ".") {
+    const derived = deriveOracleFromCwd(process.cwd());
+    if (!derived) {
+      throw new UserError(
+        "maw wake: no oracle name given and the current directory is not an oracle repo.\n" +
+        "Run inside an oracle repo or its worktree, or pass a name: maw wake <oracle>.",
+      );
+    }
+    console.log(`\x1b[36m→\x1b[0m wake: derived oracle '\x1b[1m${derived}\x1b[0m' from cwd ${process.cwd()}`);
+    oracle = derived;
+  }
 
   const parsed = parseWakeTarget(oracle);
   let parsedRepoPath: string | null = null;
@@ -1244,18 +1239,33 @@ export async function cmdWake(oracle: string, opts: WakeOptions): Promise<string
         const plan = planRehydrateWorktreeWindows(oracle, rehydratableWt, existingWindows, liveTileRoles);
         logAgentsRehydrationSource(plan.length, allWt);
         if (plan.length > 0) {
-          console.log(`\x1b[36m↻\x1b[0m rehydrating from agents/ folder:`);
-        }
-        for (const wt of plan) {
-          await tmux.newWindow(session, wt.windowName, { cwd: wt.path });
-          await new Promise(r => setTimeout(r, 300));
-          const wtEngine = wakeSession.readWorktreeEngineFile(wt.path);
-          const wtOpts = wtEngine ? { ...opts, engine: wtEngine } : opts;
-          const target = `${session}:${wt.windowName}`;
-          await tmux.sendText(target, await buildWakeCommandForPane(wt.windowName, wt.path, wtOpts, target));
-          preExistingWindows.add(wt.windowName);
-          preExistingWindowEntries.push({ name: wt.windowName, cwd: wt.path });
-          console.log(`\x1b[32m↻\x1b[0m respawned: ${wt.windowName}  \x1b[90m(from ${formatWorktreeSource(wt.path)})\x1b[0m`);
+          let skipRehydrate = false;
+          if (_wtPicker.isStdoutTTY()) {
+            console.log(`\x1b[36m↻\x1b[0m found ${plan.length} saved agent window${plan.length === 1 ? "" : "s"}:`);
+            for (const wt of plan) {
+              console.log(`  \x1b[90m${wt.windowName.padEnd(40)} ${formatWorktreeSource(wt.path)}\x1b[0m`);
+            }
+            console.log("");
+            process.stdout.write(`  Rehydrate all? [Y/n] `);
+            const answer = _wtPicker.readChoice();
+            skipRehydrate = !!answer && /^n/i.test(answer);
+          }
+          if (skipRehydrate) {
+            console.log(`\x1b[33m⚡\x1b[0m skipped agent rehydration`);
+          } else {
+            console.log(`\x1b[36m↻\x1b[0m rehydrating from agents/ folder:`);
+            for (const wt of plan) {
+              await tmux.newWindow(session, wt.windowName, { cwd: wt.path });
+              await new Promise(r => setTimeout(r, 300));
+              const wtEngine = wakeSession.readWorktreeEngineFile(wt.path);
+              const wtOpts = wtEngine ? { ...opts, engine: wtEngine } : opts;
+              const target = `${session}:${wt.windowName}`;
+              await tmux.sendText(target, await buildWakeCommandForPane(wt.windowName, wt.path, wtOpts, target));
+              preExistingWindows.add(wt.windowName);
+              preExistingWindowEntries.push({ name: wt.windowName, cwd: wt.path });
+              console.log(`\x1b[32m↻\x1b[0m respawned: ${wt.windowName}  \x1b[90m(from ${formatWorktreeSource(wt.path)})\x1b[0m`);
+            }
+          }
         }
       } else {
         logAgentsRehydrationSource(0, allWt);

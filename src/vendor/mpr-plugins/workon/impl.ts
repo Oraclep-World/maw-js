@@ -1,8 +1,9 @@
 import { hostExec } from "maw-js/sdk";
 import { tmux } from "maw-js/sdk";
 import { ghqFind } from "maw-js/core/ghq";
-import { buildCommand } from "maw-js/config";
+import { buildCommandInDir } from "maw-js/config";
 import { findWorktrees } from "maw-js/commands/shared/wake";
+import { ensureFleetSessionEntry } from "maw-js/commands/shared/fleet-ensure";
 import { resolveWorktreeTarget } from "maw-js/core/matcher/resolve-target";
 import { normalizeWorktreeLayout, worktreePathForLayout, type WorktreeLayout } from "maw-js/core/fleet/worktree-layout";
 
@@ -79,10 +80,30 @@ export async function cmdWorkon(repo: string, task?: string, opts: { layout?: Wo
     throw new Error("could not detect current tmux session");
   }
 
+  // #2571 — reuse an existing window of the same name instead of stacking a
+  // duplicate. Repeated `maw workon <repo> [task]` previously piled up windows
+  // (and a second agent) for a repo/worktree that was already open.
+  const existingWindow = (await tmux.listWindows(session)).find(w => w.name === windowName);
+  if (existingWindow) {
+    await tmux.selectWindow(`${session}:${windowName}`);
+    console.log(`\x1b[33m⚡\x1b[0m workon '${windowName}' already open in ${session} — selected`);
+    return;
+  }
+
   // Create window + start claude
   await tmux.newWindow(session, windowName, { cwd: targetPath });
   await new Promise(r => setTimeout(r, 300));
-  await tmux.sendText(`${session}:${windowName}`, buildCommand(windowName));
+  await tmux.sendText(`${session}:${windowName}`, buildCommandInDir(windowName, targetPath));
+
+  // #2572 — auto-register oracle-repo windows in the fleet so they show up in
+  // `maw ls` and rehydrate on wake. Scoped to `-oracle` repos; tool/lib repos
+  // are left out to keep the fleet registry oracle-only. Idempotent.
+  if (repoName.toLowerCase().endsWith("-oracle")) {
+    const fleet = ensureFleetSessionEntry({ session, window: windowName, cwd: targetPath, createdBy: "maw workon" });
+    if (fleet.status === "created" || fleet.status === "updated") {
+      console.log(`\x1b[32m+\x1b[0m fleet registered ${session}:${windowName}`);
+    }
+  }
 
   console.log(`\x1b[32m✅\x1b[0m workon '${windowName}' in ${session} → ${targetPath}`);
 }
