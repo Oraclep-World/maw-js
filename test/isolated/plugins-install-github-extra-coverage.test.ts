@@ -21,6 +21,7 @@ import {
 import { tmpdir } from "os";
 import { join, resolve } from "path";
 import { doInstall, doRemove } from "../../src/commands/shared/plugins-install";
+import { isUserError } from "../../src/core/util/user-error";
 import type { LoadedPlugin, PluginManifest } from "../../src/plugin/types";
 
 const createdDirs: string[] = [];
@@ -115,7 +116,12 @@ async function capture(fn: () => unknown | Promise<unknown>): Promise<CaptureRes
   try {
     await fn();
   } catch (err: any) {
-    if (!String(err?.message ?? "").startsWith("__maw_test_exit__")) throw err;
+    if (isUserError(err)) {
+      exitCode = 1;
+      errs.push(err.message);
+    } else if (!String(err?.message ?? "").startsWith("__maw_test_exit__")) {
+      throw err;
+    }
   } finally {
     (process as any).exit = originalExit;
     console.log = originalLog;

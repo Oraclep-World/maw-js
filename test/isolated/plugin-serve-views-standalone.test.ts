@@ -24,7 +24,7 @@ describe("serve-views plugin", () => {
     expect(registry.listFallbacks()).toEqual(["serve-views"]);
     const response = await registry.handleFallback(new Request("http://local/"));
     expect(response.status).toBe(200);
-    expect(await response.text()).toContain("maw");
+    expect(await response.text()).toContain("ARRA Office");
   });
 
   test("createViews preserves topology and door fallback behavior", async () => {

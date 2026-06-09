@@ -9,6 +9,15 @@ let sdkCurlFetch: any = { ok: false, status: 500, data: { error: "boom" } };
 let peerKillResponse: any = { ok: false, status: 500, data: { error: "boom" } };
 let execCalls: string[] = [];
 let ghqDir = "";
+
+class MockUserError extends Error {
+  readonly isUserError = true;
+}
+
+function isMockUserError(value: unknown): boolean {
+  return value instanceof Error && (value as { isUserError?: unknown }).isUserError === true;
+}
+
 const originalEnv = {
   home: process.env.HOME,
   mawHome: process.env.MAW_HOME,
@@ -27,6 +36,8 @@ mock.module("maw-js/config", () => ({
 }));
 
 mock.module("maw-js/sdk", () => ({
+  UserError: MockUserError,
+  isUserError: isMockUserError,
   listSessions: async () => [],
   resolveTarget: () => sdkResolveTarget,
   curlFetch: async () => sdkCurlFetch,
