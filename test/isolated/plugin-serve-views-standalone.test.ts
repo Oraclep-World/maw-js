@@ -15,16 +15,23 @@ describe("serve-views plugin", () => {
   });
 
   test("registers the Hono views fallback through the serve hook", async () => {
-    const { serve } = await import("../../src/vendor/mpr-plugins/serve-views/index.ts?standalone-register");
+    const { createViews, serve } = await import("../../src/vendor/mpr-plugins/serve-views/index.ts?standalone-register");
+    const tmp = mkdtempSync(join(tmpdir(), "maw-serve-views-register-"));
     const registry = new ServeRouteRegistry();
 
-    await serve({ http: registry, plugin: { name: "serve-views" } });
-    await serve({ http: registry, plugin: { name: "serve-views" } });
+    try {
+      const views = createViews(join(tmp, "missing-ui"), join(tmp, "missing-door.html"));
 
-    expect(registry.listFallbacks()).toEqual(["serve-views"]);
-    const response = await registry.handleFallback(new Request("http://local/"));
-    expect(response.status).toBe(200);
-    expect(await response.text()).toContain("ARRA Office");
+      await serve({ http: registry, plugin: { name: "serve-views" } }, { views });
+      await serve({ http: registry, plugin: { name: "serve-views" } }, { views });
+
+      expect(registry.listFallbacks()).toEqual(["serve-views"]);
+      const response = await registry.handleFallback(new Request("http://local/"));
+      expect(response.status).toBe(200);
+      expect(await response.text()).toContain("maw-ui not installed");
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
   });
 
   test("createViews preserves topology and door fallback behavior", async () => {
