@@ -1,4 +1,10 @@
-use std::{env, net::SocketAddr, process, sync::Arc, time::Instant};
+use std::{
+    env,
+    net::SocketAddr,
+    process,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use axum::{
     body::Body,
@@ -39,12 +45,14 @@ use tokio_tungstenite::{
 use tower_http::trace::TraceLayer;
 
 type BackendClient = Client<HttpConnector, Full<HyperBytes>>;
+const DEFAULT_PROXY_TIMEOUT_MS: u64 = 30_000;
 
 #[derive(Clone)]
 struct AppState {
     port: u16,
     backend_port: Option<u16>,
     verbosity: u8,
+    proxy_timeout: Duration,
     client: Arc<BackendClient>,
     shutdown: broadcast::Sender<()>,
 }
@@ -84,6 +92,15 @@ fn backend_label(state: &AppState) -> Option<String> {
 
 fn backend_label_or_standalone(state: &AppState) -> String {
     backend_label(state).unwrap_or_else(|| "standalone".to_string())
+}
+
+fn proxy_timeout_duration() -> Duration {
+    let timeout_ms = env::var("MAW_GATEWAY_PROXY_TIMEOUT_MS")
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(DEFAULT_PROXY_TIMEOUT_MS);
+    Duration::from_millis(timeout_ms)
 }
 
 fn status_payload(state: &AppState, backend_reachable: bool) -> StatusResponse {
@@ -341,6 +358,20 @@ async fn build_http_request(
         .map_err(|_| StatusCode::BAD_REQUEST)
 }
 
+fn map_backend_request_error(error: &dyn std::fmt::Display) -> StatusCode {
+    let message = error.to_string().to_ascii_lowercase();
+    if message.contains("connection refused")
+        || message.contains("connect error")
+        || message.contains("dns error")
+        || message.contains("connection reset")
+        || message.contains("service unavailable")
+    {
+        StatusCode::SERVICE_UNAVAILABLE
+    } else {
+        StatusCode::BAD_GATEWAY
+    }
+}
+
 async fn proxy_http(State(state): State<AppState>, req: Request<Body>) -> Response {
     let is_root = req.uri().path() == "/";
     let Some(target) = build_backend_http_uri(&state, req.uri()) else {
@@ -356,37 +387,49 @@ async fn proxy_http(State(state): State<AppState>, req: Request<Body>) -> Respon
         Err(status) => return status.into_response(),
     };
 
-    let mut upstream = match state.client.request(request).await {
-        Ok(response) => response,
-        Err(error) => {
-            eprintln!("backend request failed: {error}");
-            return if is_root {
-                Json(status_payload(&state, false)).into_response()
-            } else {
-                StatusCode::BAD_GATEWAY.into_response()
-            };
-        }
-    };
+    let mut upstream =
+        match tokio::time::timeout(state.proxy_timeout, state.client.request(request)).await {
+            Ok(Ok(response)) => response,
+            Ok(Err(error)) => {
+                let status = map_backend_request_error(&error);
+                eprintln!("backend request failed: {error}");
+                return if is_root && status == StatusCode::SERVICE_UNAVAILABLE {
+                    Json(status_payload(&state, false)).into_response()
+                } else {
+                    status.into_response()
+                };
+            }
+            Err(_) => {
+                eprintln!(
+                    "backend request timed out after {}ms",
+                    state.proxy_timeout.as_millis()
+                );
+                return (StatusCode::GATEWAY_TIMEOUT, "gateway upstream timed out").into_response();
+            }
+        };
 
     let status = upstream.status();
     let mut headers = std::mem::take(upstream.headers_mut());
     strip_response_proxy_headers(&mut headers);
-    let body = match upstream
-        .into_body()
-        .collect()
-        .await
-        .map(|collected| collected.to_bytes())
-    {
-        Ok(body) => body,
-        Err(error) => {
-            eprintln!("backend body read failed: {error}");
-            return if is_root {
-                Json(status_payload(&state, false)).into_response()
-            } else {
-                StatusCode::BAD_GATEWAY.into_response()
-            };
-        }
-    };
+    let body: bytes::Bytes =
+        match tokio::time::timeout(state.proxy_timeout, upstream.into_body().collect()).await {
+            Ok(Ok(collected)) => collected.to_bytes(),
+            Ok(Err(error)) => {
+                eprintln!("backend body read failed: {error}");
+                return if is_root {
+                    Json(status_payload(&state, false)).into_response()
+                } else {
+                    StatusCode::BAD_GATEWAY.into_response()
+                };
+            }
+            Err(_) => {
+                eprintln!(
+                    "backend body read timed out after {}ms",
+                    state.proxy_timeout.as_millis()
+                );
+                return (StatusCode::GATEWAY_TIMEOUT, "gateway upstream timed out").into_response();
+            }
+        };
 
     let mut response = Response::new(Body::from(body));
     *response.status_mut() = status;
@@ -529,7 +572,7 @@ fn app(state: AppState) -> Router {
 
 #[cfg(test)]
 mod tests {
-    use super::{app, parse_args, AppState, GatewayArgs};
+    use super::{app, parse_args, proxy_timeout_duration, AppState, GatewayArgs};
     use axum::{routing::get, Router};
     use http_body_util::{BodyExt, Full};
     use hyper::{
@@ -538,7 +581,41 @@ mod tests {
     };
     use hyper_util::client::legacy::{connect::HttpConnector, Client};
     use hyper_util::rt::TokioExecutor;
-    use tokio::{net::TcpListener, sync::broadcast, task::JoinHandle};
+    use std::time::Duration;
+    use tokio::{io::AsyncReadExt, net::TcpListener, sync::broadcast, task::JoinHandle};
+
+    struct TestCleanup {
+        shutdown: Option<broadcast::Sender<()>>,
+        tasks: Vec<JoinHandle<()>>,
+    }
+
+    impl TestCleanup {
+        fn new() -> Self {
+            Self {
+                shutdown: None,
+                tasks: Vec::new(),
+            }
+        }
+
+        fn set_shutdown(&mut self, shutdown: broadcast::Sender<()>) {
+            self.shutdown = Some(shutdown);
+        }
+
+        fn track(&mut self, task: JoinHandle<()>) {
+            self.tasks.push(task);
+        }
+    }
+
+    impl Drop for TestCleanup {
+        fn drop(&mut self) {
+            if let Some(shutdown) = self.shutdown.take() {
+                let _ = shutdown.send(());
+            }
+            for task in self.tasks.drain(..) {
+                task.abort();
+            }
+        }
+    }
 
     fn args(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| value.to_string()).collect()
@@ -581,6 +658,7 @@ mod tests {
             port,
             backend_port,
             verbosity: 1,
+            proxy_timeout: proxy_timeout_duration(),
             client: std::sync::Arc::new(test_client()),
             shutdown: shutdown.clone(),
         };
@@ -749,6 +827,76 @@ mod tests {
         let _ = handle.await;
         backend.abort();
     }
+
+    #[tokio::test]
+    async fn slow_upstream_returns_gateway_timeout_within_configured_timeout() {
+        tokio::time::timeout(Duration::from_secs(1), async {
+            let mut cleanup = TestCleanup::new();
+
+            let backend_listener = TcpListener::bind(("127.0.0.1", 0))
+                .await
+                .expect("bind backend");
+            let backend_port = backend_listener.local_addr().expect("backend addr").port();
+            cleanup.track(tokio::spawn(async move {
+                let (mut socket, _) = backend_listener.accept().await.expect("accept backend");
+                let mut buffer = [0u8; 1024];
+                let _ = socket.read(&mut buffer).await;
+                tokio::time::sleep(Duration::from_secs(60)).await;
+            }));
+
+            let listener = TcpListener::bind(("127.0.0.1", 0))
+                .await
+                .expect("bind gateway");
+            let port = listener.local_addr().expect("gateway addr").port();
+            let (shutdown, _) = broadcast::channel(16);
+            cleanup.set_shutdown(shutdown.clone());
+            let state = AppState {
+                port,
+                backend_port: Some(backend_port),
+                verbosity: 1,
+                proxy_timeout: Duration::from_millis(25),
+                client: std::sync::Arc::new(test_client()),
+                shutdown: shutdown.clone(),
+            };
+            let mut shutdown_rx = shutdown.subscribe();
+            cleanup.track(tokio::spawn(async move {
+                let _ = axum::serve(listener, app(state))
+                    .with_graceful_shutdown(async move {
+                        let _ = shutdown_rx.recv().await;
+                    })
+                    .await;
+            }));
+
+            let client = test_client();
+            let uri = format!("http://127.0.0.1:{port}/api/federation/status")
+                .parse::<HyperUri>()
+                .expect("slow uri");
+            let request = HyperRequest::builder()
+                .method("GET")
+                .uri(uri)
+                .body(Full::new(HyperBytes::new()))
+                .expect("slow request");
+            let started = tokio::time::Instant::now();
+            let response = client.request(request).await.expect("slow response");
+            let elapsed = started.elapsed();
+            let status = response.status();
+            let body = response
+                .into_body()
+                .collect()
+                .await
+                .expect("slow body")
+                .to_bytes();
+
+            assert_eq!(status, StatusCode::GATEWAY_TIMEOUT);
+            assert!(
+                elapsed < Duration::from_millis(100),
+                "elapsed was {elapsed:?}"
+            );
+            assert_eq!(body.as_ref(), b"gateway upstream timed out");
+        })
+        .await
+        .expect("slow_upstream timeout test exceeded hard 1s limit");
+    }
 }
 
 #[cfg(unix)]
@@ -783,6 +931,7 @@ async fn main() {
         port: gateway_args.port,
         backend_port: gateway_args.backend_port,
         verbosity: gateway_args.verbosity,
+        proxy_timeout: proxy_timeout_duration(),
         client: Arc::new(client),
         shutdown: shutdown_sender,
     };
