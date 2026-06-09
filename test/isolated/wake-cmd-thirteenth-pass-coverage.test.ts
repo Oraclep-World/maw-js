@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { handleTopLevelError } from "../../src/cli/error-handler";
+import { UserError } from "../../src/core/util/user-error";
 
 type WindowInfo = { name: string };
 type WorktreeInfo = { name: string; path: string };
@@ -37,6 +39,7 @@ let savedConfigs: any[] = [];
 let ensureTeamConfigReturn = false;
 let offerAttachPrompt = false;
 let capacityChecks: string[] = [];
+let capacityError: Error | null = null;
 let setEnvCalls: string[] = [];
 let lifecycleCalls: any[] = [];
 let newSessions: Array<{ session: string; opts: any }> = [];
@@ -88,6 +91,7 @@ function resetState(): void {
   ensureTeamConfigReturn = false;
   offerAttachPrompt = false;
   capacityChecks = [];
+  capacityError = null;
   setEnvCalls = [];
   lifecycleCalls = [];
   newSessions = [];
@@ -267,6 +271,7 @@ mock.module(import.meta.resolve("../../src/commands/shared/wake-target"), () => 
 mock.module(import.meta.resolve("../../src/commands/shared/wake-concurrency"), () => ({
   assertAgentCapacity: async (oracle: string) => {
     capacityChecks.push(oracle);
+    if (capacityError) throw capacityError;
   },
 }));
 
@@ -623,6 +628,49 @@ describe("wake-cmd thirteenth-pass isolated coverage", () => {
     expect(result).toBe("03-neo:neo-oracle");
     expect(newSessions).toEqual([{ session: "03-neo", opts: { window: "neo-oracle", cwd: repoPath } }]);
     expect(plain()).toContain("created session '03-neo'");
+  });
+
+  test("over-cap missing-session wake prints the UserError reason at the CLI boundary", async () => {
+    detectSessionReturn = null;
+    shouldWake = true;
+    listSessionsReturn = [{ name: "02-old" }];
+    capacityError = new UserError("agent concurrency cap reached: 13/10 agents already live — refusing to spawn 'neo'.");
+
+    let thrown: unknown;
+    await captureLogs(async () => {
+      try {
+        await cmdWake("neo", { repoPath, noRehydrate: true });
+      } catch (error) {
+        thrown = error;
+      }
+    });
+
+    expect(thrown).toBe(capacityError);
+    expect(newSessions).toEqual([]);
+    expect(plain()).toContain("no session found, creating");
+
+    const originalExit = process.exit;
+    const originalError = console.error;
+    const originalStderrWrite = process.stderr.write;
+    const stderr: string[] = [];
+    console.error = (...args: unknown[]) => stderr.push(args.map(String).join(" "));
+    process.stderr.write = ((chunk: unknown) => {
+      stderr.push(String(chunk).replace(/\n$/, ""));
+      return true;
+    }) as typeof process.stderr.write;
+    process.exit = ((code?: string | number | null | undefined) => {
+      throw new Error(`__exit__:${code ?? 0}`);
+    }) as typeof process.exit;
+    try {
+      expect(() => handleTopLevelError(thrown, ["wake", "neo"])).toThrow("__exit__:1");
+    } finally {
+      process.exit = originalExit;
+      console.error = originalError;
+      process.stderr.write = originalStderrWrite;
+    }
+
+    expect(stderr.join("\n")).toContain("agent concurrency cap reached: 13/10 agents already live");
+    expect(stderr.join("\n")).toContain("refusing to spawn 'neo'");
   });
 
   test("existing sessions restore snapshots and rehydrate worktrees before ensuring panes", async () => {
