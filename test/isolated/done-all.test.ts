@@ -5,7 +5,7 @@
  * the current tmux session, but it must never target the lead window or a
  * same-named window from another session.
  */
-import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
 import { join } from "path";
 import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
@@ -24,6 +24,16 @@ let currentSession = "work";
 let tmuxRunFails = false;
 let killWindowFails = false;
 let signalErrorFor: string | null = null;
+let tmuxCurrentWindowIndex = 0;
+let teamCharterPath: string | null = null;
+let teamRepoRoot = "/tmp/mawjs-team-root";
+let teamCharter: { name: string; members: Array<{ name: string; role: string; isLead?: boolean }> } = {
+  name: "work",
+  members: [
+    { name: "lead", role: "lead" },
+    { name: "alpha", role: "worker" },
+  ],
+};
 let resolveOracleCalls: string[] = [];
 let resolveOracleResult: { repoPath: string; repoName: string; parentDir: string } = {
   repoPath: "/tmp/mawjs-oracle",
@@ -39,7 +49,19 @@ mock.module("maw-js/sdk", () => ({
     run: async (subcommand: string, ...args: string[]) => {
       tmuxCommands.push(["run", subcommand, ...args].join(" "));
       if (tmuxRunFails) throw new Error("no current tmux session");
-      if (subcommand === "display-message") return `${currentSession}\n`;
+      if (subcommand === "display-message") {
+        const format = args.includes("#{session_name}\t#{window_index}")
+          ? "#{session_name}\t#{window_index}"
+          : args[1] === "#{session_name}\t#{window_index}"
+            ? "#{session_name}\t#{window_index}"
+            : args[0];
+
+        if (format === "#{session_name}\t#{window_index}") {
+          return `${currentSession}\t${tmuxCurrentWindowIndex}\n`;
+        }
+        if (format === "#{session_name}") return `${currentSession}\n`;
+        return `${currentSession}\n`;
+      }
       return "";
     },
     killWindow: async (target: string) => {
@@ -90,8 +112,21 @@ mock.module("maw-js/commands/shared/wake-resolve", () => ({
   },
 }));
 
+mock.module("maw-js/vendor/mpr-plugins/team/team-charter", () => ({
+  readTeamCharter: () => teamCharter,
+}));
+
+mock.module("maw-js/vendor/mpr-plugins/team/team-liveness", () => ({
+  findRepoRoot: () => teamRepoRoot,
+  resolveCharterPath: () => teamCharterPath,
+}));
+
 const { cmdDoneAll } = await import("../../src/vendor/mpr-plugins/done/impl");
 const donePlugin = await import("../../src/vendor/mpr-plugins/done/index");
+
+afterAll(() => {
+  mock.restore();
+});
 
 beforeEach(() => {
   sessions = [
@@ -121,6 +156,16 @@ beforeEach(() => {
   tmuxRunFails = false;
   killWindowFails = false;
   signalErrorFor = null;
+  tmuxCurrentWindowIndex = 0;
+  teamCharterPath = null;
+  teamCharter = {
+    name: "work",
+    members: [
+      { name: "lead", role: "lead" },
+      { name: "alpha", role: "worker" },
+    ],
+  };
+  teamRepoRoot = "/tmp/mawjs-team-root";
   resolveOracleCalls = [];
   resolveOracleResult = {
     repoPath: "/tmp/mawjs-oracle",
@@ -147,6 +192,61 @@ describe("cmdDoneAll", () => {
     expect(tmuxCommands).not.toContain("kill other:duplicate");
     expect(worktreeLookups).toEqual([]);
     expect(removedFleetEntries).toEqual([]);
+  });
+
+  test("protects the configured lead window by name when lead index is not smallest", async () => {
+    sessions = [{
+      name: "139-mawjs",
+      windows: [
+        { index: 0, name: "mawjs-codex-1", active: true },
+        { index: 2, name: "mawjs-oracle", active: false },
+      ],
+    }];
+    currentSession = "139-mawjs";
+    tmuxCurrentWindowIndex = 0;
+    teamCharterPath = "/tmp/mawjs-team.yaml";
+    teamCharter = {
+      name: "mawjs-m5",
+      members: [
+        { name: "mawjs-oracle", role: "lead", isLead: true },
+        { name: "mawjs-codex-1", role: "agent" },
+      ],
+    };
+
+    const { cmdDone } = await import("../../src/vendor/mpr-plugins/done/impl");
+
+    await cmdDone("mawjs-codex-1", { force: true });
+    expect(tmuxCommands).toContain("kill 139-mawjs:mawjs-codex-1");
+
+    await expect(cmdDone("mawjs-oracle", { force: true })).rejects.toThrow("refusing to done lead window");
+    expect(tmuxCommands).toContain("run display-message -p #{session_name}\t#{window_index}");
+  });
+
+  test("allows done lead window when current tmux identity is unavailable (subshell case)", async () => {
+    sessions = [{
+      name: "139-mawjs",
+      windows: [
+        { index: 0, name: "mawjs-codex-1", active: true },
+        { index: 2, name: "mawjs-oracle", active: false },
+      ],
+    }];
+    currentSession = "139-mawjs";
+    tmuxCurrentWindowIndex = 2;
+    tmuxRunFails = true;
+    teamCharterPath = "/tmp/mawjs-team.yaml";
+    teamCharter = {
+      name: "mawjs-m5",
+      members: [
+        { name: "mawjs-oracle", role: "lead" },
+        { name: "mawjs-codex-1", role: "agent" },
+      ],
+    };
+
+    const { cmdDone } = await import("../../src/vendor/mpr-plugins/done/impl");
+
+    await expect(cmdDone("mawjs-oracle", { force: true })).resolves.toBeUndefined();
+    expect(tmuxCommands).toContain("kill 139-mawjs:mawjs-oracle");
+    expect(tmuxCommands).toContain("run display-message -p #{session_name}\t#{window_index}");
   });
 
   test("--force skips auto-save and kills only current-session non-lead windows", async () => {
