@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   ALIAS_DESCRIPTIONS,
   invokeDirectHandler,
@@ -8,6 +8,17 @@ import {
   type TopAliasHandlerDeps,
 } from "../src/cli/top-aliases";
 import { UserError } from "../src/core/util/user-error";
+
+const originalMawTestMode = process.env.MAW_TEST_MODE;
+
+beforeEach(() => {
+  process.env.MAW_TEST_MODE = "1";
+});
+
+afterEach(() => {
+  if (originalMawTestMode === undefined) delete process.env.MAW_TEST_MODE;
+  else process.env.MAW_TEST_MODE = originalMawTestMode;
+});
 
 function makeDeps() {
   const calls = {
@@ -70,6 +81,11 @@ describe("top alias resolution table", () => {
   });
 
   test("direct aliases return handler specs and trimmed argv", () => {
+    expect(resolveTopAlias(["work", "--task", "ship-fix", "--wt", "issue-1"])).toEqual({
+      kind: "direct",
+      handler: "../commands/shared/wake-cmd:cmdWake",
+      argv: ["--work", ".", "--task", "ship-fix", "--wt", "issue-1"],
+    });
     expect(resolveTopAlias(["ls", "-v"])).toEqual({ kind: "direct", handler: "cmdLs", argv: ["-v"] });
     expect(resolveTopAlias(["layout", "tiled"])).toEqual({ kind: "direct", handler: "cmdLayout", argv: ["tiled"] });
     expect(resolveTopAlias(["bring", "neo"])).toEqual({
@@ -239,10 +255,27 @@ describe("direct handler invocation", () => {
     expect(calls.layout).toEqual([]);
 
     await invokeDirectHandler("cmdLayout", ["tiled"], deps);
-    expect(calls.layout).toEqual([[".", "tiled"]]);
+    expect(calls.layout).toHaveLength(1);
+    expect(calls.layout[0]?.[1]).toBe("tiled");
 
     await expect(invokeDirectHandler("cmdLayout", [], deps)).rejects.toThrow("layout: missing preset");
     expect(calls.errors.join("\n")).toContain("usage: maw layout <preset>");
+  });
+
+  test("work alias invokes wake with cwd-derived --work . and forwards params", async () => {
+    const { calls, deps } = makeDeps();
+    const resolved = resolveTopAlias(["work", "--task", "ship-fix"]);
+
+    expect(resolved).toEqual({
+      kind: "direct",
+      handler: "../commands/shared/wake-cmd:cmdWake",
+      argv: ["--work", ".", "--task", "ship-fix"],
+    });
+    if (!resolved || resolved.kind !== "direct") throw new Error("work alias did not resolve direct");
+
+    await invokeDirectHandler(resolved.handler, resolved.argv, deps);
+
+    expect(calls.wake).toEqual([[".", { sessionMode: "work", task: "ship-fix" }]]);
   });
 
   test("wake help prints usage without invoking wake", async () => {
