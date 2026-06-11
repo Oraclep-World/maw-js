@@ -1,5 +1,5 @@
 import type { MawConfig } from "../../config/types";
-import { isClaudeLikeCommand, resolveEngine } from "../../config/engine-registry";
+import { ENGINE_SEED, isClaudeLikeCommand, resolveEngine } from "../../config/engine-registry";
 
 /**
  * Shared claude-like engine detector (#2099).
@@ -25,9 +25,15 @@ export function isClaudeLikeEngine(
 ): boolean {
   const name = engine?.trim();
   if (!name) return false;
-  if (name.toLowerCase() === "claude") return true;
 
-  const def = resolveEngine(name, config);
-  if (isClaudeLikeCommand(def.cmd)) return true;
-  return def.capabilities?.includes(CLAUDE_LIKE_CAPABILITY) ?? false;
+  let def;
+  try {
+    def = resolveEngine(name, config);
+  } catch {
+    // Read-only classification can fall back to the seed registry when config is
+    // unavailable/empty. Launch resolution remains strict in resolveEngine().
+    def = ENGINE_SEED[name.toLowerCase()];
+  }
+  if (isClaudeLikeCommand(def?.cmd ?? "")) return true;
+  return def?.capabilities?.includes(CLAUDE_LIKE_CAPABILITY) ?? false;
 }
