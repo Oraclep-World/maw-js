@@ -24,13 +24,105 @@ type StreamDeps = {
   clearTimeout: typeof clearTimeout;
 };
 
+type Subscriber = {
+  send: (chunk: string | Uint8Array) => void;
+};
+
+type TargetBus = {
+  target: string;
+  tempDir: string;
+  consumerPath: string;
+  child: ChildProcessLike | null;
+  subscribers: Map<symbol, Subscriber>;
+  backlog: Uint8Array[];
+  backlogBytes: number;
+  closing: Promise<void> | null;
+  deps: StreamDeps;
+};
+
+const targetBuses = new Map<string, Promise<TargetBus>>();
+
+async function createTargetBus(target: string, deps: StreamDeps): Promise<TargetBus> {
+  const tempDir = deps.mkdtempSync(join(deps.tmpdir(), "maw-share-"));
+  const consumerPath = makeStreamConsumerPath(tempDir, target);
+  const bus: TargetBus = {
+    target,
+    tempDir,
+    consumerPath,
+    child: null,
+    subscribers: new Map(),
+    backlog: [],
+    backlogBytes: 0,
+    closing: null,
+    deps,
+  };
+
+  try {
+    await Bun.write(consumerPath, "");
+    const command = `cat >> ${shellEscapeArg(consumerPath)}`;
+    // tmux has one pipe-pane slot per pane. Use -o/onlyIfClosed so a second
+    // viewer for the same target never clobbers the existing producer; all
+    // viewers subscribe to this per-target fan-out bus instead.
+    await deps.tmux.pipePane(target, command, { onlyIfClosed: true });
+    bus.child = await deps.spawnTail(consumerPath, (chunk) => {
+      if (bus.subscribers.size === 0) {
+        bufferBacklog(bus, chunk);
+        return;
+      }
+      for (const subscriber of bus.subscribers.values()) subscriber.send(chunk);
+    });
+    return bus;
+  } catch (error) {
+    targetBuses.delete(target);
+    try { await teardownBus(bus); } catch { /* best effort after setup failure */ }
+    throw error;
+  }
+}
+
+async function getTargetBus(target: string, deps: StreamDeps): Promise<TargetBus> {
+  let pending = targetBuses.get(target);
+  if (!pending) {
+    pending = createTargetBus(target, deps);
+    targetBuses.set(target, pending);
+  }
+  return pending;
+}
+
+async function teardownBus(bus: TargetBus): Promise<void> {
+  if (bus.closing) return bus.closing;
+  bus.closing = (async () => {
+    targetBuses.delete(bus.target);
+    try {
+      await bus.deps.tmux.pipePane(bus.target);
+    } catch {
+      // best-effort stream teardown
+    }
+
+    await awaitOrKill(bus.child, bus.deps);
+    bus.child = null;
+
+    try {
+      bus.deps.rmSync(bus.tempDir, { recursive: true, force: true });
+    } catch {
+      // best effort
+    }
+  })();
+  return bus.closing;
+}
+
+export function __resetShareStreamBusesForTests(): void {
+  targetBuses.clear();
+}
+
 export interface ShareStreamHandle {
   onMessage: (message: unknown) => void;
   close: () => Promise<void>;
 }
 
 const DEFAULT_SNAPSHOT_LINES = 120;
-const CLOSE_TIMEOUT_MS = 1_500;
+const CLOSE_TIMEOUT_MS = 50;
+const MAX_BACKLOG_CHUNKS = 64;
+const MAX_BACKLOG_BYTES = 1024 * 1024;
 
 function defaultDeps(): StreamDeps {
   return {
@@ -106,21 +198,39 @@ function nextEncryptedFrame(share: Share, data: string | Uint8Array): string | U
   return encryptShareFrame(share.encryptionKey, data, counter);
 }
 
-async function awaitOrKill(child: ChildProcessLike | null, deps: Pick<StreamDeps, "setTimeout" | "clearTimeout">): Promise<void> {
-  if (!child) return;
-  const timer = deps.setTimeout(() => {}, CLOSE_TIMEOUT_MS);
+function bufferBacklog(bus: TargetBus, chunk: Uint8Array): void {
+  const copy = chunk.slice();
+  bus.backlog.push(copy);
+  bus.backlogBytes += copy.byteLength;
+
+  while (bus.backlog.length > MAX_BACKLOG_CHUNKS || bus.backlogBytes > MAX_BACKLOG_BYTES) {
+    const dropped = bus.backlog.shift();
+    bus.backlogBytes -= dropped?.byteLength ?? 0;
+  }
+}
+
+function drainBacklog(bus: TargetBus): Uint8Array[] {
+  const backlog = bus.backlog.splice(0);
+  bus.backlogBytes = 0;
+  return backlog;
+}
+
+async function waitForExit(child: ChildProcessLike, ms: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
   try {
-    await Promise.race([
-      child.exited,
-      new Promise<void>((resolve) => {
-        deps.setTimeout(() => {
-          resolve();
-        }, CLOSE_TIMEOUT_MS);
+    return await Promise.race([
+      child.exited.then(() => true, () => true),
+      new Promise<boolean>((resolve) => {
+        timer = globalThis.setTimeout(() => resolve(false), ms);
       }),
     ]);
   } finally {
-    deps.clearTimeout(timer);
+    if (timer) globalThis.clearTimeout(timer);
   }
+}
+
+async function awaitOrKill(child: ChildProcessLike | null, _deps: Pick<StreamDeps, "setTimeout" | "clearTimeout">): Promise<void> {
+  if (!child) return;
 
   try {
     child.kill("SIGTERM");
@@ -128,22 +238,15 @@ async function awaitOrKill(child: ChildProcessLike | null, deps: Pick<StreamDeps
     // best effort
   }
 
-  const hardKill = new Promise<void>((resolve) => {
-    deps.setTimeout(() => {
-      resolve();
-    }, 250);
-  });
-  try {
-    await Promise.race([child.exited, hardKill]);
-  } catch {
-    // ignore
-  }
+  if (await waitForExit(child, CLOSE_TIMEOUT_MS)) return;
 
   try {
     child.kill("SIGKILL");
   } catch {
     // ignore
   }
+
+  await waitForExit(child, CLOSE_TIMEOUT_MS);
 }
 
 function normalizePing(message: string): string {
@@ -165,14 +268,18 @@ export async function attach(share: Share, ws: ServerWebSocket, deps: Partial<St
     throw new Error("share expired before stream attach");
   }
 
-  const tempDir = resolved.mkdtempSync(join(resolved.tmpdir(), "maw-share-"));
-  const consumerPath = makeStreamConsumerPath(tempDir, share.target);
-
-  await Bun.write(consumerPath, "");
-
   let closed = false;
-  let consumerChild: ChildProcessLike | null = null;
   let expiryTimer: ReturnType<typeof setTimeout> | null = null;
+  let bus: TargetBus | null = null;
+  const subscriberId = Symbol(`share:${share.target}`);
+
+  const detach = async (): Promise<void> => {
+    if (!bus) return;
+    const targetBus = bus;
+    bus = null;
+    targetBus.subscribers.delete(subscriberId);
+    if (targetBus.subscribers.size === 0) await teardownBus(targetBus);
+  };
 
   const close = async (): Promise<void> => {
     if (closed) return;
@@ -183,30 +290,18 @@ export async function attach(share: Share, ws: ServerWebSocket, deps: Partial<St
       expiryTimer = null;
     }
 
-    try {
-      await resolved.tmux.pipePane(share.target);
-    } catch {
-      // best-effort stream teardown
-    }
-
-    await awaitOrKill(consumerChild, resolved);
-    consumerChild = null;
-
-    try {
-      resolved.rmSync(tempDir, { recursive: true, force: true });
-    } catch {
-      // best effort
-    }
+    await detach();
   };
 
   expiryTimer = resolved.setTimeout(() => {
     void (async () => {
-      await close();
+      const closePromise = close();
       try {
         ws.close(1008, "share expired");
       } catch {
         // socket may already be closed
       }
+      await closePromise;
     })();
   }, Math.max(0, share.expiresAt - Date.now()));
 
@@ -220,13 +315,19 @@ export async function attach(share: Share, ws: ServerWebSocket, deps: Partial<St
     const snapshot = await resolved.tmux.capture(share.target, DEFAULT_SNAPSHOT_LINES);
     if (snapshot) sendSafe(ws, nextEncryptedFrame(share, snapshot));
 
-    const command = `cat >> ${shellEscapeArg(consumerPath)}`;
-    await resolved.tmux.pipePane(share.target, command);
-
-    consumerChild = await resolved.spawnTail(consumerPath, (chunk) => {
-      if (closed) return;
-      sendSafe(ws, nextEncryptedFrame(share, chunk));
-    });
+    bus = await getTargetBus(share.target, resolved);
+    if (closed) {
+      await detach();
+    } else {
+      const subscriber = {
+        send: (chunk: string | Uint8Array) => {
+          if (closed) return;
+          sendSafe(ws, nextEncryptedFrame(share, chunk));
+        },
+      };
+      bus.subscribers.set(subscriberId, subscriber);
+      for (const chunk of drainBacklog(bus)) subscriber.send(chunk);
+    }
   } catch (error) {
     await close();
     throw error;
