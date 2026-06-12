@@ -11,9 +11,9 @@ type Session = { name: string; windows?: Array<{ index?: number; name?: string }
 let sessions: Session[] = [];
 let hostCommands: string[] = [];
 let hostOutput = "captured output";
-let resolveResult: unknown = { tier: 1, sessionName: "54-mawjs" };
+let resolveResult: string | null = "54-mawjs:7";
 let loadFleetCalls = 0;
-let resolveCalls: Array<{ target: string; deps: Record<string, unknown> }> = [];
+let resolveCalls: string[] = [];
 
 function parseFlags(args: string[], spec: Record<string, unknown>) {
   const out: Record<string, any> = { _: [] };
@@ -42,34 +42,12 @@ mock.module("maw-js/sdk", () => ({
     loadFleetCalls += 1;
     return [{ name: "54-mawjs", windows: [{ name: "mawjs-oracle" }] }];
   },
-  parseFlags,
-  tmuxCmd: () => "tmux -L test",
-}));
-
-mock.module(import.meta.resolve("../../src/vendor/mpr-plugins/attach/resolve-attach-target.ts"), () => ({
-  resolveAttachTarget: async (target: string, deps: Record<string, unknown>) => {
-    resolveCalls.push({ target, deps });
-    if (target === "remote:") {
-      return { tier: "error", error: "invalid remote attach target 'remote:'" };
-    }
-    if (target === "remote:neo") {
-      return { tier: 3, node: "remote", sessionName: "neo", sshAlias: "remote-ssh" };
-    }
-    if (target === "01-mawjs") {
-      const rows = await (deps.listSessions as () => Promise<Session[]>)();
-      const row = rows.find((session) => session.name === target);
-      if (row) {
-        const windowName = row.windows?.find((window) => window.name === "mawjs-oracle")?.name;
-        return { tier: 1, sessionName: row.name, ...(windowName ? { windowName } : {}) };
-      }
-    }
-    if (target === "sleepy") {
-      const rows = (deps.loadFleet as () => Session[])();
-      const row = rows.find((session) => session.name === "02-sleepy" || session.windows?.some((window) => window.name === "sleepy"));
-      if (row) return { tier: 2, fleetName: row.name };
-    }
+  resolvePeekTarget: async (target: string) => {
+    resolveCalls.push(target);
     return resolveResult;
   },
+  parseFlags,
+  tmuxCmd: () => "tmux -L test",
 }));
 
 const { command, default: captureHandler } = await import("../../src/vendor/mpr-plugins/capture/index.ts");
@@ -82,7 +60,7 @@ beforeEach(() => {
   sessions = [{ name: "54-mawjs", windows: [{ index: 7, name: "mawjs-oracle" }] }];
   hostCommands = [];
   hostOutput = "captured output";
-  resolveResult = { tier: 1, sessionName: "54-mawjs" };
+  resolveResult = "54-mawjs:7";
   loadFleetCalls = 0;
   resolveCalls = [];
 });
@@ -111,15 +89,18 @@ describe("capture plugin standalone boundary (#2191)", () => {
     const result = await captureHandler({ source: "cli", args: ["mawjs", "--pane", "2", "--lines", "12"] } as any);
 
     expect(result).toEqual({ ok: true, output: "captured output" });
-    expect(resolveCalls.map((call) => call.target)).toEqual(["mawjs"]);
+    expect(resolveCalls).toEqual(["mawjs"]);
     expect(loadFleetCalls).toBe(0);
     expect(hostCommands).toEqual(["tmux -L test capture-pane -t '54-mawjs:7.2' -p -S -12"]);
   });
 
   test("API target supports explicit window suffix and full scrollback", async () => {
+    resolveResult = "54-mawjs:3";
+
     const result = await captureHandler({ source: "api", args: { target: "mawjs:3", full: true } } as any);
 
     expect(result.ok).toBe(true);
+    expect(resolveCalls).toEqual(["mawjs:3"]);
     expect(hostCommands).toEqual(["tmux -L test capture-pane -t '54-mawjs:3' -p -S -"]);
   });
 
