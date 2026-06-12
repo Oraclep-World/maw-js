@@ -3,6 +3,7 @@
 // Paths differ from the core copy: charter is a sibling here, and commands/shared
 // is three levels up (vendored dir is src/vendor/mpr-plugins/team).
 import { existsSync, readFileSync } from "fs";
+import { ghqFind } from "maw-js/sdk";
 import { resolve } from "path";
 import { readTeamCharter, type TeamCharter } from "./team-charter";
 import { loadConfig } from "../../../config/load";
@@ -76,6 +77,25 @@ export interface TeamUpDeps {
 
 const DEFAULT_SLEEP = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 const SHELL_RE = /^-?(zsh|bash|sh|fish)$/i;
+
+function normalizeProjectSlug(project: string): string {
+  return project
+    .trim()
+    .replace(/^https?:\/\/github\.com\//i, "")
+    .replace(/^git@github\.com:/i, "")
+    .replace(/^github\.com\//i, "")
+    .replace(/\.git$/i, "")
+    .replace(/^\/+|\/+$/g, "");
+}
+
+async function resolveProjectRepoRoot(project: string): Promise<string> {
+  const slug = normalizeProjectSlug(project);
+  const repoRoot = await ghqFind(`github.com/${slug}`) ?? await ghqFind(`/${slug}`);
+  if (!repoRoot) {
+    throw new UserError(`team up project repo not found: ${slug} (try: ghq get github.com/${slug})`);
+  }
+  return repoRoot;
+}
 
 function renderRoster(team: string, session: string, roster: ClassifiedTeamMember[], actions: TeamUpAction[], warnings: string[], tail?: string): string {
   const actionByMember = new Map(actions.map((action) => [action.memberKey, action]));
@@ -214,6 +234,11 @@ export async function cmdTeamUp(team: string, opts: TeamUpOptions = {}, deps: Te
   const repoRoot = deps.repoRoot ?? findRepoRoot(cwd);
   const repoSlug = deps.repoSlug ?? repoSlugFromRoot(repoRoot);
   const targetRepoSlug = charter.project ?? repoSlug;
+  let worktreeRepoRoot: string | undefined;
+  const resolveWorktreeRepoRoot = async () => {
+    worktreeRepoRoot ??= charter.project ? await resolveProjectRepoRoot(charter.project) : repoRoot;
+    return worktreeRepoRoot;
+  };
   const currentSession = await currentTmuxSession(tmux).catch(() => "");
   const session = opts.session?.trim() || charter.session || currentSession;
   if (!session) throw new Error(`session required: pass --session <name> when running team up outside tmux and charter.session is omitted`);
@@ -290,7 +315,7 @@ export async function cmdTeamUp(team: string, opts: TeamUpOptions = {}, deps: Te
         item,
         run: async () => {
           if (item.pane) await tmux.run("kill-window", "-t", `${item.pane.sessionName ?? session}:${item.pane.windowName}`);
-          await wakeMember(targetRepoSlug, item.member, { engine: item.engine, session, repoPath: repoRoot, channels: memberChannels(charter, item.member) }, { cmdWakeFn: deps.cmdWakeFn });
+          await wakeMember(targetRepoSlug, item.member, { engine: item.engine, session, repoPath: await resolveWorktreeRepoRoot(), channels: memberChannels(charter, item.member) }, { cmdWakeFn: deps.cmdWakeFn });
         },
       });
     } else if (item.state === "live") {
@@ -311,7 +336,7 @@ export async function cmdTeamUp(team: string, opts: TeamUpOptions = {}, deps: Te
       launchTasks.push({
         item,
         run: async () => {
-          await wakeMember(targetRepoSlug, item.member, { engine: item.engine, session, repoPath: repoRoot, channels: memberChannels(charter, item.member) }, { cmdWakeFn: deps.cmdWakeFn });
+          await wakeMember(targetRepoSlug, item.member, { engine: item.engine, session, repoPath: await resolveWorktreeRepoRoot(), channels: memberChannels(charter, item.member) }, { cmdWakeFn: deps.cmdWakeFn });
         },
       });
     }

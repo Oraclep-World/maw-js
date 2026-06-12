@@ -13,9 +13,11 @@ import { cmdTeamUp, quickCharter } from "../../src/vendor/mpr-plugins/team/team-
 import { cmdTeamDown, TEAM_LIFECYCLE_GUARD_WINDOW } from "../../src/vendor/mpr-plugins/team/team-down";
 import { cmdTeamApply } from "../../src/vendor/mpr-plugins/team/team-apply";
 import { isUserError } from "../../src/core/util/user-error";
+import { resetRepos, setRepos } from "../../src/core/repo-discovery";
 
 const dirs: string[] = [];
 afterEach(() => {
+  resetRepos();
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -386,10 +388,12 @@ agents:
     ]);
   });
 
-  test("team up wakes charter.project and primes inline plus file-ref prompts", async () => {
+  test("team up wakes charter.project from the project repo, not the invoking cwd repo", async () => {
     const root = mkdtempSync(join(tmpdir(), "maw-node-prompt-"));
-    dirs.push(root);
+    const projectRoot = mkdtempSync(join(tmpdir(), "maw-project-root-"));
+    dirs.push(root, projectRoot);
     mkdirSync(join(root, ".git"));
+    mkdirSync(join(projectRoot, ".git"));
     mkdirSync(join(root, ".maw"), { recursive: true });
     mkdirSync(join(root, "prompts"), { recursive: true });
     writeFileSync(join(root, "prompts", "claude48.md"), "file prompt\n", "utf-8");
@@ -406,6 +410,14 @@ agents:
     engine: claude48
     prompt: ./prompts/claude48.md
 `, "utf-8");
+    setRepos({
+      name: "test-ghq",
+      list: async () => [`/ghq/github.com/soul-brews-studio/mawjs-oracle`, `${projectRoot}/github.com/soul-brews-studio/maw-js`],
+      listSync: () => [`/ghq/github.com/soul-brews-studio/mawjs-oracle`, `${projectRoot}/github.com/soul-brews-studio/maw-js`],
+      findBySuffix: async (suffix: string) => suffix.toLowerCase().includes("soul-brews-studio/maw-js") ? projectRoot : null,
+      findBySuffixSync: (suffix: string) => suffix.toLowerCase().includes("soul-brews-studio/maw-js") ? projectRoot : null,
+      detectFromCwd: () => null,
+    });
     const { tmux } = fakeTmux([]);
     const wakes: any[] = [];
     const sends: any[] = [];
@@ -421,9 +433,10 @@ agents:
     });
 
     expect(wakes).toEqual([
-      ["soul-brews-studio/maw-js", { wt: "codex", engine: "omx", session: "charter-session", repoPath: root, channels: true }],
-      ["soul-brews-studio/maw-js", { wt: "claude48", engine: "claude48", session: "charter-session", repoPath: root, channels: true }],
+      ["soul-brews-studio/maw-js", { wt: "codex", engine: "omx", session: "charter-session", repoPath: projectRoot, channels: true }],
+      ["soul-brews-studio/maw-js", { wt: "claude48", engine: "claude48", session: "charter-session", repoPath: projectRoot, channels: true }],
     ]);
+    expect(wakes.map((wake) => wake[1].repoPath)).not.toContain(root);
     expect(sends).toEqual([
       ["charter-session:codex", "inline prompt", false, { currentSession: "charter-session" }],
       ["charter-session:claude48", "file prompt", false, { currentSession: "charter-session" }],
