@@ -214,7 +214,7 @@ export { sparkline } from "../lib/sparkline";
 export { tlink } from "../core/util/terminal";
 
 // Plugin extraction helpers for tab-like command surfaces.
-export { cmdPeek, cmdSend } from "../commands/shared/comm";
+export { cmdPeek, cmdSend, resolvePeekTarget } from "../commands/shared/comm";
 export { cmdSplit } from "../commands/plugins/split/impl";
 export { buildAgentRows } from "../commands/shared/agents";
 export type { AgentRow } from "../commands/shared/agents";

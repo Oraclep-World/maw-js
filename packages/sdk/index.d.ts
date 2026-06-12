@@ -375,6 +375,9 @@ export declare function sparkline(values: number[], hadActivity?: boolean[]): st
 /** Peek/capture a target session or window and print the result. */
 export declare function cmdPeek(query?: string): Promise<void>;
 
+/** Resolve a local target using the same session/window resolver as maw peek. */
+export declare function resolvePeekTarget(query: string): Promise<string | null>;
+
 /** Send a message to an oracle/window target. */
 export declare function cmdSend(target: string, message: string, force?: boolean): Promise<void>;
 export declare function resolveOraclePane(target: string): Promise<string>;
