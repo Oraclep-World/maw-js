@@ -9,6 +9,7 @@ process.env.HOME = tmpHome;
 const sshPath = import.meta.resolve("../../src/core/transport/ssh.ts");
 const tmuxPath = import.meta.resolve("../../src/core/transport/tmux.ts");
 const configPath = import.meta.resolve("../../src/config/index.ts");
+const configDirPath = import.meta.resolve("../../src/config");
 const targetCwdPath = import.meta.resolve("../../src/commands/shared/target-cwd.ts");
 
 let selectCalls: string[] = [];
@@ -49,9 +50,12 @@ mock.module(tmuxPath, () => ({
   },
 }));
 
-mock.module(configPath, () => ({
+const configMock = () => ({
   buildCommand: (oracle: string) => `claude --oracle ${oracle || "default"}`,
-}));
+});
+
+mock.module(configPath, configMock);
+mock.module(configDirPath, configMock);
 
 mock.module(targetCwdPath, () => ({
   extractOracleName: (target: string) => target.split(":")[0]?.replace(/^\d+-/, "") || "",

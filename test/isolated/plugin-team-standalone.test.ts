@@ -138,7 +138,7 @@ describe("team command plugin standalone boundary (#2336)", () => {
     const teamUp = readFileSync(join(root, "src/vendor/mpr-plugins/team/team-up.ts"), "utf8");
     expect(teamUp).toContain("Promise.all(launchTasks.map((task) => task.run()))");
     expect(teamUp).toContain("Promise.all(launchTasks.map((task) => waitForNonShell");
-    expect(teamUp).toContain("validateRosterEngines(roster, charter, config)");
+    expect(teamUp).toContain("validateRosterEngines(roster, charter, config, opts.engine)");
     const sdk = readFileSync(join(root, "src/sdk/index.ts"), "utf8");
     expect(sdk).toContain("parseFlags");
     expect(sdk).toContain("hostExec");
@@ -327,7 +327,7 @@ agents:
     expect(memberEngine({ role: "builder", engine: "aider" } as any, undefined, { defaultEngine: "codex" } as any)).toBe("aider");
     expect(memberEngine({ role: "builder", engine: "aider" } as any, "thclaws", { defaultEngine: "codex" } as any)).toBe("thclaws");
     expect(memberEngine({ role: "builder" } as any, undefined, { commands: { default: "codex --legacy" } } as any)).toBe("default");
-    expect(memberEngine({ role: "builder" } as any, undefined, {} as any)).toBe("claude");
+    expect(() => memberEngine({ role: "builder" } as any, undefined, {} as any)).toThrow(/no default engine configured/);
     expect(resolveCharterEngineCommand("opus48", { opus48: ["claude --model opus", ["--dangerously-skip-permissions"]] })).toBe("claude --model opus --dangerously-skip-permissions");
   });
 
