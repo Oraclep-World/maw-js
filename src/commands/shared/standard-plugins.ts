@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, readdirSync, symlinkSync, unlinkSync } from "fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, readdirSync, rmSync, symlinkSync, unlinkSync } from "fs";
 import { dirname, join, relative, resolve } from "path";
 import pkg from "../../../package.json" with { type: "json" };
 import { mawDataPath } from "../../core/xdg";
@@ -83,6 +83,14 @@ function rootFromCliPath(path: string): string | undefined {
   return undefined;
 }
 
+function safeRefSegment(ref: string): string {
+  return ref.replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+
+function standardPluginCacheRoot(ref: string): string {
+  return join(process.env.MAW_STANDARD_PLUGIN_CACHE_DIR || mawDataPath("standard-plugin-source"), safeRefSegment(ref));
+}
+
 function bunGlobalRoot(): string | undefined {
   try {
     const proc = Bun.spawnSync(["bun", "pm", "bin", "-g"], { stdout: "pipe", stderr: "pipe" });
@@ -97,7 +105,7 @@ function bunGlobalRoot(): string | undefined {
   }
 }
 
-function candidateSourceRoots(explicit?: string): string[] {
+function candidateSourceRoots(explicit?: string, ref?: string): string[] {
   const roots = [
     explicit,
     process.env.MAW_STANDARD_PLUGIN_SOURCE_ROOT,
@@ -113,33 +121,65 @@ function defaultRef(): string {
   return process.env.MAW_STANDARD_PLUGIN_REF || `v${pkg.version}`;
 }
 
-function fetchMawJsSource(ref: string, log: (line: string) => void): void {
+function standardPluginGitUrl(): string {
+  return process.env.MAW_STANDARD_PLUGIN_GIT_URL || "https://github.com/Soul-Brews-Studio/maw-js.git";
+}
+
+function hasInstalledNodeModules(root: string): boolean {
+  return existsSync(join(root, "node_modules"));
+}
+
+function ensureFetchedSourceDependencies(root: string, log: (line: string) => void): void {
+  if (hasInstalledNodeModules(root)) return;
+  log(`→ installing standard plugin source dependencies: bun install (${root})`);
+  const proc = Bun.spawnSync(["bun", "install"], { cwd: root, stdout: "pipe", stderr: "pipe" });
+  if (proc.exitCode !== 0) {
+    const stderr = new TextDecoder().decode(proc.stderr).trim();
+    const stdout = new TextDecoder().decode(proc.stdout).trim();
+    throw new Error(stderr || stdout || `bun install exited ${proc.exitCode}`);
+  }
+}
+
+function fetchMawJsSource(ref: string, log: (line: string) => void): string {
   const candidates = [ref, "alpha"].filter((value, index, arr) => value && arr.indexOf(value) === index);
   let last = "";
   for (const candidate of candidates) {
-    const spec = `github:Soul-Brews-Studio/maw-js#${candidate}`;
-    log(`→ fetching standard plugin source: bun add -g ${spec}`);
-    const proc = Bun.spawnSync(["bun", "add", "-g", spec], { stdout: "pipe", stderr: "pipe" });
-    if (proc.exitCode === 0) return;
-    const stderr = new TextDecoder().decode(proc.stderr).trim();
-    const stdout = new TextDecoder().decode(proc.stdout).trim();
-    last = stderr || stdout || `bun add -g exited ${proc.exitCode}`;
-    log(`  ! fetch failed for ${candidate}: ${last}`);
+    const dest = standardPluginCacheRoot(candidate);
+    try {
+      if (hasStandardPluginSources(dest, candidate)) {
+        ensureFetchedSourceDependencies(dest, log);
+        return dest;
+      }
+      try { rmSync(dest, { recursive: true, force: true }); } catch {}
+      mkdirSync(dirname(dest), { recursive: true });
+      const url = standardPluginGitUrl();
+      log(`→ fetching standard plugin source: git clone --depth 1 -b ${candidate} ${url} ${dest}`);
+      const proc = Bun.spawnSync(["git", "clone", "--depth", "1", "--branch", candidate, url, dest], { stdout: "pipe", stderr: "pipe" });
+      if (proc.exitCode !== 0 || !hasStandardPluginSources(dest, candidate)) {
+        const stderr = new TextDecoder().decode(proc.stderr).trim();
+        const stdout = new TextDecoder().decode(proc.stdout).trim();
+        throw new Error(stderr || stdout || `git clone exited ${proc.exitCode}`);
+      }
+      ensureFetchedSourceDependencies(dest, log);
+      return dest;
+    } catch (err: any) {
+      last = err?.message || String(err);
+      log(`  ! fetch failed for ${candidate}: ${last}`);
+      try { rmSync(dest, { recursive: true, force: true }); } catch {}
+    }
   }
   throw new Error(`failed to fetch maw-js standard plugin source (${last || "unknown error"})`);
 }
 
 export function resolveStandardPluginSourceRoot(options: { sourceRoot?: string; ref?: string; fetch?: boolean; log?: (line: string) => void } = {}): string {
-  for (const root of candidateSourceRoots(options.sourceRoot)) {
+  for (const root of candidateSourceRoots(options.sourceRoot, options.ref || defaultRef())) {
     if (hasStandardPluginSources(root, options.ref)) return root;
   }
   if (options.fetch === false) {
-    throw new Error("standard plugin source not found; run from a maw-js checkout or allow fetching with bun add -g");
+    throw new Error("standard plugin source not found; run from a maw-js checkout or allow fetching with git clone");
   }
-  fetchMawJsSource(options.ref || defaultRef(), options.log ?? console.log);
-  for (const root of candidateSourceRoots(options.sourceRoot)) {
-    if (hasStandardPluginSources(root, options.ref)) return root;
-  }
+  const fetched = fetchMawJsSource(options.ref || defaultRef(), options.log ?? console.log);
+  if (hasStandardPluginSources(fetched, undefined)) return fetched;
   throw new Error("standard plugin source fetch completed, but no maw-js plugin sources were found");
 }
 
