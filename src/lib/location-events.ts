@@ -55,7 +55,11 @@ function randomId(): string {
 function isoTs(ts: LocationLifecycleInput["ts"]): string {
   if (ts instanceof Date) return ts.toISOString();
   if (typeof ts === "number") return new Date(ts).toISOString();
-  if (typeof ts === "string" && ts.trim()) return ts;
+  if (typeof ts === "string" && ts.trim()) {
+    // Normalize rather than passing through: guarantee data.ts is always real ISO.
+    const d = new Date(ts);
+    if (!Number.isNaN(d.getTime())) return d.toISOString();
+  }
   return new Date().toISOString();
 }
 
@@ -98,9 +102,13 @@ export function buildLocationLifecycleFeedEvent(input: LocationLifecycleInput): 
   return {
     timestamp,
     oracle: "timekeeper",
+    // Physical location is body-centric, not host-bound; provenance is the
+    // single-writer `oracle` stamp. Left blank intentionally.
     host: "",
     event: eventTypeFor(data.transition),
     project: "",
+    // Intentional reuse: no dedicated location slot on FeedEvent, so the
+    // envelope carries locationId here (the full payload lives in `data`).
     sessionId: data.locationId,
     message,
     ts,
