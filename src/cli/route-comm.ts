@@ -72,6 +72,8 @@ export async function routeComm(cmd: string, args: string[]): Promise<boolean> {
     let noVerifySubmit = false;
     let from: string | undefined;
     let target: string | undefined;
+    let useStdin = false;
+    let msgFile: string | undefined;
     const msgArgs: string[] = [];
 
     for (let i = 0; i < rest.length; i += 1) {
@@ -95,6 +97,22 @@ export async function routeComm(cmd: string, args: string[]): Promise<boolean> {
         from = arg.slice("--from=".length);
         continue;
       }
+      // #3 — message body from stdin/file: bypass shell escaping for long or
+      // special-char payloads (quotes/backticks/newlines break positional args).
+      if (arg === "--stdin") { useStdin = true; continue; }
+      if (arg === "--file") {
+        if (!rest[i + 1] || rest[i + 1].startsWith("--")) {
+          console.error("✗ missing value for --file");
+          throw new UserError("missing value for --file");
+        }
+        msgFile = rest[i + 1];
+        i += 1;
+        continue;
+      }
+      if (arg.startsWith("--file=")) {
+        msgFile = arg.slice("--file=".length);
+        continue;
+      }
       if (!target) target = arg;
       else msgArgs.push(arg);
     }
@@ -114,11 +132,28 @@ export async function routeComm(cmd: string, args: string[]): Promise<boolean> {
       printCommUsage(cmd, console.error);
       throw new UserError("missing target and message");
     }
-    if (!msgArgs.length) {
+    // #3 — resolve the message body: positional args by default, OR read from
+    // stdin / a file when --stdin / --file is set (escaping-free transport).
+    let messageText = msgArgs.join(" ");
+    if (useStdin || msgFile) {
+      if (msgArgs.length) {
+        console.error("✗ cannot mix a positional message with --stdin/--file");
+        throw new UserError("conflicting message sources");
+      }
+      if (useStdin && msgFile) {
+        console.error("✗ cannot use both --stdin and --file");
+        throw new UserError("conflicting message sources");
+      }
+      messageText = useStdin ? await Bun.stdin.text() : await Bun.file(msgFile!).text();
+    } else if (!msgArgs.length) {
       console.error(`✗ missing message for target '${target}'`);
-      console.error(`  maw ${cmd} ${target} <message>`);
+      console.error(`  maw ${cmd} ${target} <message>   |   maw ${cmd} ${target} --stdin   |   maw ${cmd} ${target} --file <path>`);
       console.error(`  (if '${target}' isn't a valid target, run 'maw ls' to see available ones)`);
       throw new UserError(`missing message for '${target}'`);
+    }
+    if (!messageText.trim()) {
+      console.error(`✗ empty message for target '${target}' (stdin/file ว่างเปล่า)`);
+      throw new UserError(`empty message for '${target}'`);
     }
     if (force) {
       if (isNotify) {
@@ -127,7 +162,7 @@ export async function routeComm(cmd: string, args: string[]): Promise<boolean> {
         console.error("\x1b[90mnote: --force is deprecated; maw hey delivers by default. Use --inbox to queue without pane injection.\x1b[0m");
       }
     }
-    await cmdSend(target, msgArgs.join(" "), force, { approve, trust, inboxOnly, ...(noVerifySubmit ? { noVerifySubmit } : {}), ...(from ? { from } : {}) });
+    await cmdSend(target, messageText, force, { approve, trust, inboxOnly, ...(noVerifySubmit ? { noVerifySubmit } : {}), ...(from ? { from } : {}) });
     return true;
   }
   return false;
