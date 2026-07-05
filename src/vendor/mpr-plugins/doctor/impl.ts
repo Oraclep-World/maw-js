@@ -24,6 +24,7 @@ import { checkMawJsBranch } from "./internal/maw-js-branch-check";
 import { checkStillbornWorktrees } from "./internal/stillborn-worktrees";
 import { checkStalePeers, cmdFixStalePeers } from "./internal/stale-peers";
 import { detectBunLinkedCheckout } from "./internal/bun-link-detect";
+import { checkSourceIntegrity } from "./internal/source-integrity";
 import { fixDoubledGithubSessions } from "./internal/fix-sessions";
 import { normalizeGateway, resolveGatewayBinary, type GatewayKind } from "maw-js/core/gateway";
 
@@ -130,6 +131,9 @@ export async function cmdDoctor(args: string[] = []): Promise<DoctorResult> {
     }
     if (!only || only === "manifest" || only === "all") {
       checks.push(checkCrossSourceConsistency({ silent: json }));
+    }
+    if (!only || only === "source-integrity" || only === "all") {
+      checks.push(checkSourceIntegrity());
     }
     if (!only || only === "maw-js" || only === "all") {
       checks.push(await checkMawJsBranch());
