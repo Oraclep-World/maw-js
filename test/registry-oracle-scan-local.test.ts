@@ -2,7 +2,7 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { deriveName, readFleetLineage, scanLocal } from "../src/core/fleet/registry-oracle-scan-local";
+import { compileScanIgnore, deriveName, readFleetLineage, scanLocal } from "../src/core/fleet/registry-oracle-scan-local";
 
 const roots: string[] = [];
 
@@ -267,5 +267,65 @@ describe("registry-oracle-scan-local", () => {
     expect(logs.some(line => line.includes("federation-enriched 1"))).toBe(true);
     expect(logs.some(line => line.includes("fleet-only oracles"))).toBe(true);
     expect(warnings.some(line => line.includes("failed to walk repos root"))).toBe(true);
+  });
+
+  test("compileScanIgnore matches exact keys, globs, and single-char wildcards; empty set never matches", () => {
+    const none = compileScanIgnore(undefined);
+    expect(none("Any/Repo")).toBe(false);
+    expect(compileScanIgnore([]) ("Any/Repo")).toBe(false);
+    expect(compileScanIgnore(["  ", "", 42 as unknown as string])("Any/Repo")).toBe(false);
+
+    const match = compileScanIgnore([
+      "Oraclep-World/oracle-vault", // exact
+      "*/opensource-nat-brain-oracle", // any org
+      "Junk/*", // any repo under org
+      "Weird/ui?", // single-char wildcard
+    ]);
+    expect(match("Oraclep-World/oracle-vault")).toBe(true);
+    expect(match("oraclep-world/ORACLE-VAULT")).toBe(true); // case-insensitive
+    expect(match("Anyone/opensource-nat-brain-oracle")).toBe(true);
+    expect(match("Junk/whatever-oracle")).toBe(true);
+    expect(match("Weird/uix")).toBe(true);
+    expect(match("Weird/ui")).toBe(false); // ? requires exactly one char
+    expect(match("Oraclep-World/real-oracle")).toBe(false); // regex metachar '-' stays literal
+  });
+
+  test("scanLocal drops repos and fleet-only refs whose key matches scanIgnore", () => {
+    const root = tmpRoot("ignore");
+    const ghqRoot = join(root, "ghq");
+    const fleetDir = join(root, "fleet");
+    mkdirp(fleetDir);
+
+    // Noise: a vault owning a top-level ψ/, and a -oracle-suffixed non-soul tool.
+    makeRepo(ghqRoot, "Oraclep-World", "oracle-vault", { psi: true });
+    makeRepo(ghqRoot, "Soul-Brews-Studio", "opensource-nat-brain-oracle");
+    // A real soul that must survive.
+    const realDir = makeRepo(ghqRoot, "Soul-Brews-Studio", "keep-oracle", { psi: true });
+
+    writeJson(join(fleetDir, "fleet.json"), {
+      project_repos: ["Missing/ghost-oracle"], // fleet-only ref that should be ignored
+      budded_from: "root-oracle",
+      budded_at: "2026-05-16T01:02:03.000Z",
+    });
+
+    const entries = scanLocal(false, {
+      ghqRoot,
+      fleetDir,
+      now: "2026-05-16T04:05:06.000Z",
+      config: { node: "m5", agents: {} },
+      scanIgnore: [
+        "Oraclep-World/oracle-vault",
+        "*/opensource-nat-brain-oracle",
+        "Missing/ghost-oracle",
+      ],
+    });
+
+    expect(entries.map(e => `${e.org}/${e.repo}`)).toEqual([
+      "Soul-Brews-Studio/keep-oracle",
+    ]);
+    expect(entries.find(e => e.repo === "keep-oracle")).toMatchObject({
+      local_path: realDir,
+      has_psi: true,
+    });
   });
 });

@@ -120,15 +120,39 @@ export function deriveName(repo: string): string {
   return repo.replace(/-oracle$/, "");
 }
 
+/**
+ * @internal
+ * Compile `scanIgnore` glob patterns into a predicate over `org/repo` keys.
+ * `*` → any run of characters (including `/`), `?` → a single character; all
+ * other regex metacharacters are escaped. Matching is case-insensitive and
+ * anchored to the full key. Blank/non-string patterns are dropped; an empty
+ * pattern set yields a predicate that never matches (zero-cost fast path).
+ */
+export function compileScanIgnore(patterns: readonly unknown[] | undefined): (key: string) => boolean {
+  const globs = (patterns ?? []).filter((p): p is string => typeof p === "string" && p.trim().length > 0);
+  if (globs.length === 0) return () => false;
+  const regexes = globs.map(glob => {
+    const source = glob
+      .trim()
+      .replace(/[.+^${}()|[\]\\]/g, "\\$&") // escape regex metachars (but not * ?)
+      .replace(/\*/g, ".*")
+      .replace(/\?/g, ".");
+    return new RegExp(`^${source}$`, "i");
+  });
+  return (key: string) => regexes.some(re => re.test(key));
+}
+
 // ---------- Local scan ----------
 
 interface ScanLocalDeps {
-  config?: Pick<MawConfig, "node" | "agents">;
+  config?: Pick<MawConfig, "node" | "agents" | "scanIgnore">;
   fleetDir?: string;
   fleetDirs?: string[];
   ghqRoot?: string;
   now?: string;
   fleetLineage?: Map<string, FleetLineage>;
+  /** Override scan-ignore globs directly (tests); falls back to config.scanIgnore. */
+  scanIgnore?: string[];
 }
 
 function parseFleetRepoSlug(key: string): { org: string; repo: string } | null {
@@ -152,6 +176,7 @@ export function scanLocal(verbose = true, deps: ScanLocalDeps = {}): OracleEntry
   const reposRoot = join(deps.ghqRoot ?? getGhqRoot(), "github.com");
   const now = deps.now ?? new Date().toISOString();
   const fleetLineage = deps.fleetLineage ?? readFleetLineage(fleetDirs);
+  const isIgnored = compileScanIgnore(deps.scanIgnore ?? config.scanIgnore);
   const entries: OracleEntry[] = [];
   const seen = new Set<string>();
 
@@ -184,6 +209,10 @@ export function scanLocal(verbose = true, deps: ScanLocalDeps = {}): OracleEntry
         repoCount++;
 
         const key = `${org}/${repo}`;
+        if (isIgnored(key)) {
+          if (verbose) console.log(`  \x1b[90m  ⏭ ignoring ${key} (scanIgnore)\x1b[0m`);
+          continue;
+        }
         const hasPsi = existsSync(join(repoPath, "ψ"));
         const fleetKey = fleetLineage.has(key) ? key : null;
         const endsWithOracle = repo.endsWith("-oracle");
@@ -250,7 +279,7 @@ export function scanLocal(verbose = true, deps: ScanLocalDeps = {}): OracleEntry
   // Also add fleet-referenced repos that aren't on disk
   let fleetOnly = 0;
   for (const [key, lineage] of fleetLineage) {
-    if (!seen.has(key)) {
+    if (!seen.has(key) && !isIgnored(key)) {
       const parsed = parseFleetRepoSlug(key);
       if (parsed) {
         const { org, repo } = parsed;

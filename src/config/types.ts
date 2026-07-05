@@ -184,6 +184,18 @@ export interface MawConfig {
   githubOrg?: string;
   /** GitHub orgs to scan for oracle repos (default: Soul-Brews-Studio, laris-co) */
   githubOrgs?: string[];
+  /**
+   * Glob patterns matched against `org/repo` keys to EXCLUDE from the local
+   * oracle scan (#registry-noise). A repo is dropped from detection when its
+   * key matches any pattern, even if it would otherwise qualify (ψ/ dir,
+   * fleet reference, or `-oracle` suffix). Case-insensitive. `*` matches any
+   * run of characters (including `/`), `?` matches a single character.
+   *
+   * Use for non-soul repos that trip the heuristics — e.g. a vault that owns
+   * a top-level `ψ/`, or a tool named `*-oracle` that isn't a fleet member:
+   *   "scanIgnore": ["Oraclep-World/oracle-vault", "*\/opensource-nat-brain-oracle"]
+   */
+  scanIgnore?: string[];
   /** Fixed Claude session UUIDs per agent */
   sessionIds?: Record<string, string>;
   /** Path to ψ/ directory */
