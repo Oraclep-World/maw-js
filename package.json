@@ -1,8 +1,8 @@
 {
   "name": "maw-js",
-  "version": "26.6.14-alpha.2110",
+  "version": "26.7.5-alpha.2008",
   "license": "BUSL-1.1",
-  "repository": "Soul-Brews-Studio/maw-js",
+  "repository": "Oraclep-World/maw-js",
   "type": "module",
   "workspaces": [
     "packages/*"
