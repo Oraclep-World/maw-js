@@ -147,7 +147,9 @@ export default async function handler(ctx: InvokeContext): Promise<InvokeResult>
 
     // API source
     const body = ctx.args as Record<string, unknown>;
-    const oracle = body.oracle as string | undefined;
+    // #791 senders post {target}; accept it current-first with {oracle} as the
+    // legacy pre-rename field (mirrors src/api/sessions.ts /api/wake).
+    const oracle = (body.target ?? body.oracle) as string | undefined;
     if (!oracle) return { ok: false, error: "missing oracle name" };
 
     const wakeOpts: {
