@@ -147,7 +147,8 @@ export default async function handler(ctx: InvokeContext): Promise<InvokeResult>
 
     // API source
     const body = ctx.args as Record<string, unknown>;
-    const oracle = body.oracle as string | undefined;
+    // "target" is canonical post-rename; "oracle" kept for legacy pre-rename senders.
+    const oracle = (body.target ?? body.oracle) as string | undefined;
     if (!oracle) return { ok: false, error: "missing oracle name" };
 
     const wakeOpts: {
