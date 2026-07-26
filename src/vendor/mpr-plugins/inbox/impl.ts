@@ -111,7 +111,10 @@ const SAFE_DRAIN_PATTERNS: Array<{ reason: string; pattern: RegExp }> = [
   { reason: "next-slice-shipped", pattern: /\bshipped next slice\b/i },
   { reason: "slice-shipped", pattern: /\bshipped\b.{0,80}\bslice\b/i },
   { reason: "delivery-confirm", pattern: /\bdelivery\s*[- ]?confirm(?:ed|s)?\b/i },
-  { reason: "council", pattern: /\b(ratified|no\s*response\s*needed|co-?sign(?:ed|ing)?|โหวต|ปิดวง|ไม่ต้อง\s*ตอบ)\b/i },
+  // #PQ-2026-07-26 — \b ใน JS นิยามจาก [A-Za-z0-9_] เท่านั้น ⇒ อักษรไทยไม่ใช่ word char
+  // ⇒ /\bปิดวง\b/.test("ปิดวง") === false ⇒ คำไทยทั้งสามคำเดิมเป็นโค้ดตาย ไม่เคยทำงานเลย
+  // แยกคำไทยออกมานอก \b group (ไทยไม่เว้นวรรคระหว่างคำอยู่แล้ว จึงไม่ต้องการ boundary)
+  { reason: "council", pattern: /\b(ratified|no\s*response\s*needed|co-?sign(?:ed|ing)?)\b|โหวต|ปิดวง|ไม่ต้อง\s*ตอบ/i },
   { reason: "council", pattern: /\bstage\s+\d+\s+closed\b/i },
 ];
 
@@ -302,7 +305,10 @@ function topLevelInboxFiles(inboxDir: string): string[] {
 export function parseInboxFilenameTimestamp(filename: string): Date | null {
   const m = basename(filename).match(/^(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})_/);
   if (!m) return null;
-  const date = new Date(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:00`);
+  // #PQ-2026-07-26 — ชื่อไฟล์ถูกเขียนเป็น UTC (receiver-inbox.ts ใช้ toISOString())
+  // ต้องมี Z ไม่งั้น JS ตีเป็นเวลาท้องถิ่น ⇒ อายุเพี้ยนเท่ากับ offset ของโซนเวลา
+  // (TZ=+07 ⇒ จดหมายอายุ 4 นาที ถูกนับว่าอายุ 7 ชั่วโมง ⇒ ด่านอายุของ drain เปิดสนิท)
+  const date = new Date(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:00Z`);
   return isNaN(date.getTime()) ? null : date;
 }
 
@@ -471,10 +477,13 @@ function safeDrainReason(msg: InboxMessage): string | null {
 }
 
 function drainTimestampMs(msg: InboxMessage): number | null {
-  const fromFilename = parseInboxFilenameTimestamp(msg.filename);
-  if (fromFilename) return fromFilename.getTime();
+  // #PQ-2026-07-26 — frontmatter.timestamp มาก่อน (เป็น ISO เต็มมี Z = ไม่กำกวม)
+  // แล้วค่อยตกมาที่ชื่อไฟล์ (นาทีเดียว ไม่มีวินาที) — ลำดับเดียวกับ loadInboxMessages (#1142)
+  // เดิมลองชื่อไฟล์ก่อน ซึ่ง parse ผ่านเสมอ ⇒ บรรทัด frontmatter ไม่มีวันถูกเรียก = โค้ดตาย
   const fromFrontmatter = msg.frontmatter.timestamp ? new Date(msg.frontmatter.timestamp) : null;
   if (fromFrontmatter && !isNaN(fromFrontmatter.getTime())) return fromFrontmatter.getTime();
+  const fromFilename = parseInboxFilenameTimestamp(msg.filename);
+  if (fromFilename) return fromFilename.getTime();
   return null;
 }
 
@@ -591,7 +600,12 @@ export function formatInboxDrainResult(result: InboxDrainResult): string {
 export function writeInboxFile(inboxDir: string, from: string, to: string, body: string): string {
   if (!existsSync(inboxDir)) mkdirSync(inboxDir, { recursive: true });
   const now = new Date();
-  const ts = now.toISOString().slice(0, 10) + "_" + now.toTimeString().slice(0, 5).replace(":", "-");
+  // #PQ-2026-07-26 — เดิมผสมสองนาฬิกา: วันที่จาก toISOString() (UTC เสมอ)
+  // + เวลาจาก toTimeString() (ตาม TZ ของ process) ⇒ ถ้ามีใครตั้ง TZ จะได้ชื่อไฟล์
+  // ที่เป็น "วันที่ UTC + เวลาท้องถิ่น" = เวลาที่ไม่เคยมีอยู่จริง และ parse กลับไม่ได้
+  // แก้ให้มาจากนาฬิกาเรือนเดียว (UTC) ตรงกับ receiver-inbox.ts และตัว parse ที่เติม Z แล้ว
+  const iso = now.toISOString();
+  const ts = iso.slice(0, 10) + "_" + iso.slice(11, 16).replace(":", "-");
   const filename = `${ts}_${from}_${slugify(body)}.md`;
   const fm: InboxFrontmatter = { from, to, timestamp: now.toISOString(), read: false };
   writeFileSync(join(inboxDir, filename), buildFrontmatter(fm) + "\n" + body + "\n");
@@ -612,7 +626,8 @@ export function loadInboxMessages(inboxDir: string): InboxMessage[] {
       let ts = frontmatter.timestamp ? new Date(frontmatter.timestamp) : null;
       if (!ts || isNaN(ts.getTime())) {
         const m = f.match(/^(\d{4})-?(\d{2})-?(\d{2})[_T](\d{2})-?(\d{2})/);
-        ts = m ? new Date(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:00`) : null;
+        // #PQ-2026-07-26 — ชื่อไฟล์เป็น UTC ต้องมี Z (เหมือน parseInboxFilenameTimestamp)
+        ts = m ? new Date(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:00Z`) : null;
       }
       if (!ts || isNaN(ts.getTime())) {
         const { statSync } = require("fs");
