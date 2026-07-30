@@ -7,6 +7,7 @@ import {
   curlFetch, runHook,
 } from "../../sdk";
 import { Tmux } from "../../core/transport/tmux";
+import { isSameOracleName } from "./oracle-name-key";
 import { AmbiguousMatchError } from "../../core/runtime/find-window";
 import { detectWindowMismatch } from "../../core/routing";
 import { loadConfig, cfgLimit } from "../../config";
@@ -642,9 +643,15 @@ export async function cmdSend(
     const isCanonical = parts.length >= 3 || (parts.length === 2 && (isTmuxSessionIdTarget(bareAgent) || isExplicitRemoteSession));
     const isLocalScope = !targetNode || targetNode === config.node || targetNode === "local";
     if (isLocalScope && bareAgent && !isCanonical) {
+      // Liveness is compared on the canonical oracle key, not on raw strings.
+      // tmux window names are created lowercased (`pq-oracle`) while the oracle
+      // is spelled `PQ`, and session names carry a fleet ordinal (`08-PQ`) —
+      // a `===` comparison answered "not live" for every mixed-case oracle,
+      // so `maw hey main:PQ` auto-woke a session that was already running and
+      // typed the engine launch command into the live pane.
       const hasLocalSession = sessions.some(s =>
-        s.name === bareAgent ||
-        s.windows.some(w => w.name === `${bareAgent}-oracle` || w.name === bareAgent)
+        isSameOracleName(s.name, bareAgent) ||
+        s.windows.some(w => isSameOracleName(w.name, bareAgent))
       );
       try {
         // Sub-PR 4 of #841: use the unified OracleManifest as the source of

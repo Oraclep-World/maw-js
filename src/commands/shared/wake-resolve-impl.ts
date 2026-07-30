@@ -17,6 +17,7 @@ import { scanSuggestOracle } from "./wake-resolve-scan-suggest";
 import { loadFleet, resolveFleetSession, type FleetWindow } from "./fleet-load";
 import type { Session } from "../../core/runtime/find-window";
 import { sanitizeBranchName } from "./sanitize-branch-name";
+import { oracleNameKey, stripOracleSuffix, stripNumericFleetPrefix } from "./oracle-name-key";
 
 export { sanitizeBranchName } from "./sanitize-branch-name";
 
@@ -150,17 +151,12 @@ function repoSlugFromPath(path: string): string {
   return parts.length >= 2 ? parts.slice(-2).join("/") : repoNameFromPath(path);
 }
 
-function stripOracleSuffix(name: string): string {
-  return name.replace(/-oracle$/i, "");
-}
-
-function stripNumericFleetPrefix(name: string): string {
-  return name.replace(/^\d+-/, "");
-}
-
-function hyphenInsensitiveSessionKey(name: string): string {
-  return stripOracleSuffix(stripNumericFleetPrefix(name.trim().toLowerCase())).replace(/-/g, "");
-}
+// The three normalizers used to live here as private helpers. They are now
+// shared exports (`./oracle-name-key`) so other call sites can reuse the
+// comparison instead of rolling a raw `===` that mishandles case — see #hey
+// auto-wake regression, where `comm-send.ts` compared `PQ-oracle` to the
+// lowercased tmux window name `pq-oracle` and concluded a live oracle was dead.
+const hyphenInsensitiveSessionKey = oracleNameKey;
 
 function findHyphenInsensitiveSessions<T extends { name: string }>(
   sessions: readonly T[],

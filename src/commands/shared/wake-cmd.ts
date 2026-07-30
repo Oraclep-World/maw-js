@@ -1623,7 +1623,23 @@ export async function cmdWake(oracle: string, opts: WakeOptions): Promise<string
             await sendPromptViaTmux(target, opts.prompt);
           }
         } else {
-          await sendWakeCommandAndPrompt(target, opts.prompt, wakeCommand, opts.engine);
+          // The launch command may only be typed into a pane whose engine is
+          // gone. This branch used to send it unconditionally — and because the
+          // ψ/inbox drain above synthesizes `opts.prompt` whenever unread mail
+          // exists, every wake with pending mail typed
+          // `claude --dangerously-skip-permissions --continue` into a *running*
+          // agent, where it lands in the prompt box and is submitted as user
+          // input (burning a turn and still leaving the mail unread).
+          //
+          // The aliveness probe already existed 8 lines below this block; it
+          // was simply unreachable from this early return. Same probe, hoisted
+          // to where the decision is actually made.
+          const livePaneInfo = (await getPaneInfos([target]))[target];
+          if (livePaneInfo && isAgentCommand(livePaneInfo.command)) {
+            await sendPromptViaTmux(target, opts.prompt);
+          } else {
+            await sendWakeCommandAndPrompt(target, opts.prompt, wakeCommand, opts.engine);
+          }
         }
         if (opts.attach) await wakeSession.attachToSession(session);
         await maybeSplit(target, opts);

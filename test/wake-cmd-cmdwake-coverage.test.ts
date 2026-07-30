@@ -1842,7 +1842,17 @@ describe("cmdWake main-suite coverage", () => {
     expect(logs.join("\n")).toContain("switching engine to thclaws");
   });
 
-  test("sends prompts into an existing window without creating duplicates", async () => {
+  // `paneCommandDefault` is "codex" for this suite — a LIVE agent. A prompted
+  // wake must therefore deliver only the prompt; typing the launch command into
+  // a running agent puts it in the agent's prompt box, where it is submitted as
+  // user input. This test previously asserted the launch command WAS sent, which
+  // locked in that bug: `maw hey` on an oracle with unread ψ/inbox mail
+  // synthesizes a prompt, so every such send typed
+  // `claude --dangerously-skip-permissions --continue` into a working oracle.
+  // The sibling test above ("reuses the first window listing…") already asserted
+  // the correct no-relaunch behavior on the same live pane — the two disagreed
+  // solely because the prompted path returned before reaching the alive probe.
+  test("sends prompts into an existing live window without relaunching the agent", async () => {
     const { result } = await captureLogs(() =>
       cmdWake("mawjs", { prompt: "quote safe", split: true, window: true }),
     );
@@ -1850,11 +1860,11 @@ describe("cmdWake main-suite coverage", () => {
     expect(result).toBe("54-mawjs:mawjs-oracle");
     expect(newWindowCalls).toEqual([]);
     expect(selectWindowCalls).toEqual(["54-mawjs:mawjs-oracle"]);
-    expect(sendTextCalls).toEqual([
-      {
-        target: "54-mawjs:mawjs-oracle",
-        text: `cd ${repoPath} && codex --agent mawjs-oracle`,
-      },
+    // No launch command — the agent is already running.
+    expect(sendTextCalls).toEqual([]);
+    // The prompt itself still lands, via send-keys + Enter.
+    expect(tmuxRunCalls).toContainEqual([
+      "send-keys", "-t", "54-mawjs:mawjs-oracle", "quote safe", "Enter",
     ]);
     expect(maybeSplitCalls).toEqual([
       { target: "54-mawjs:mawjs-oracle", opts: expect.objectContaining({ split: true, window: true }) },
@@ -1863,6 +1873,29 @@ describe("cmdWake main-suite coverage", () => {
       { target: "54-mawjs:mawjs-oracle", opts: expect.objectContaining({ split: true, window: true }) },
     ]);
     expect(takeSnapshotCalls).toEqual(["wake"]);
+  });
+
+  // The other half of the same decision: when the pane has NO agent, the launch
+  // command is exactly what is needed. Without this case, deleting the alive
+  // probe would leave the suite green.
+  test("sends the launch command when a prompted wake finds a dead pane", async () => {
+    paneCommandDefault = "zsh";
+
+    const { result } = await captureLogs(() =>
+      cmdWake("mawjs", { prompt: "quote safe" }),
+    );
+
+    expect(result).toBe("54-mawjs:mawjs-oracle");
+    expect(newWindowCalls).toEqual([]);
+    expect(sendTextCalls).toEqual([
+      {
+        target: "54-mawjs:mawjs-oracle",
+        text: `cd ${repoPath} && codex --agent mawjs-oracle`,
+      },
+    ]);
+    expect(tmuxRunCalls).toContainEqual([
+      "send-keys", "-t", "54-mawjs:mawjs-oracle", "quote safe", "Enter",
+    ]);
   });
 
   test("uses a numeric pre-resolved session without re-detecting the oracle", async () => {
