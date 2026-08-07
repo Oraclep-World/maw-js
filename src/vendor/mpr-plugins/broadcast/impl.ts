@@ -223,7 +223,7 @@ export async function cmdBroadcast(message: string, scope: BroadcastScopeOptions
   const skipReasons = new Map<string, number>();
   // 🔒 ด่านที่ 2 — ส่งซ้ำใส่ pane เดิม
   // tmux link-window ทำให้ pane เดียวโผล่ในหลาย session (โต๊ะ codex เห็นได้จาก
-  // 08-PQ + 90-family-codex + fam-view-1..5) ⇒ วัดจริงบนเครื่อง main 7 ส.ค. 01:3x:
+  // 08-PQ + 90-family-codex + fam-view-1..5) ⇒ วัดจริงบนเครื่อง main 7 ส.ค. ~10:4x (+07) — รัน date ก่อนติดป้าย:
   // broadcast 1 ใบ = 50 target แต่ pane จริงแค่ 20 ⇒ **30 ใบเป็นของซ้ำ (60%)**
   // ห้อง codex 1 ห้องได้ข้อความเดียวกัน ~7 รอบ · กฎ `.endsWith("-view")` ที่มีอยู่
   // ไม่ครอบ `fam-view-1..5` เพราะชื่อลงท้ายด้วยเลข ⇒ ด่านต้องยึด pane ไม่ใช่ชื่อ session
