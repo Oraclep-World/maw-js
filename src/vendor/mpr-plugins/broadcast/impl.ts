@@ -7,6 +7,51 @@ export interface BroadcastScopeOptions {
   session?: string;
   team?: string;
   fleet?: string;
+  dryRun?: boolean;
+}
+
+/**
+ * ด่านกัน "ใบไม่จ่าหน้า" เข้าโต๊ะคนงาน — tmux session option ที่เจ้าของโต๊ะตั้งเอง:
+ *   tmux set-option -t 90-family-codex @maw-no-broadcast 1
+ *
+ * เหตุ (7 ส.ค. 2026 · พลีมเคาะ): broadcast แบบไม่ scope ตกลง pane ของ codex ทั้ง 5 ห้อง
+ * ⇒ 1 คำถาม กลายเป็นคำตอบครึ่งใบ 4 ชิ้นวิ่งไปหาผู้ส่ง + จ่าย token 4 รอบ
+ * เกิดซ้ำ 2 รอบใน 6 วัน (31 ก.ค. ค้าง composer ทั้ง 5 → 6 ส.ค. ตอบซ้ำ) ทั้งที่
+ * codex-workspace/FLEET-PLAYBOOK.md กฎเหล็กข้อ 3 เขียนอาการ+ของแก้ไว้ครบแล้ว
+ * ⇒ กฎที่เป็นตัวหนังสือกันไม่อยู่ ด่านต้องอยู่ในกลไกที่ส่ง ไม่ใช่ในคู่มือที่คนอ่าน
+ *
+ * จ่าหน้าถึงตรงๆ ด้วย --session <name> ยังส่งได้เสมอ — ด่านนี้กันเฉพาะใบที่ไม่ได้จ่าหน้า
+ */
+export const NO_BROADCAST_OPTION = "@maw-no-broadcast";
+
+function optionIsOn(raw: string | null | undefined): boolean {
+  return /^(1|true|yes|on)$/i.test((raw ?? "").trim());
+}
+
+async function sessionOptsOutOfBroadcast(sessionName: string): Promise<boolean> {
+  try {
+    return optionIsOn(await tmux.run("show-options", "-t", sessionName, "-qv", NO_BROADCAST_OPTION));
+  } catch {
+    // อ่าน option ไม่ได้ = ไม่ถือว่า opt-out (ด่านต้องไม่ทำให้ใบปกติหาย)
+    return false;
+  }
+}
+
+/**
+ * ระดับ window — หน่วยที่ถูกต้องจริงๆ
+ *
+ * วัดบนเครื่อง main 7 ส.ค.: ห้อง codex ถูก link เข้าทั้ง `90-family-codex`, `08-PQ`
+ * และ `fam-view-1..5` ⇒ ปิดที่ระดับ session ไม่พอ เพราะ `08-PQ` เป็นบ้านของ PQ เองด้วย
+ * (ปิดทั้ง session = ปิดห้องทำงานของเขาไปด้วย) · window เดียวกันที่ link ข้าม session
+ * ใช้ option ร่วมกัน ⇒ ตั้งครั้งเดียวคุมทุกชื่อที่มันโผล่
+ *   tmux set-option -w -t 08-PQ:codex-workspace-codex-1 @maw-no-broadcast 1
+ */
+async function windowOptsOutOfBroadcast(target: string): Promise<boolean> {
+  try {
+    return optionIsOn(await tmux.run("show-options", "-w", "-t", target, "-qv", NO_BROADCAST_OPTION));
+  } catch {
+    return false;
+  }
 }
 
 export interface BroadcastCommand {
@@ -15,7 +60,7 @@ export interface BroadcastCommand {
 }
 
 function usage(): string {
-  return "usage: maw broadcast <message> [--session <name>] [--team <name>] [--fleet <name>]";
+  return "usage: maw broadcast <message> [--session <name>] [--team <name>] [--fleet <name>] [--dry-run]";
 }
 
 export function parseBroadcastArgs(args: string[]): BroadcastCommand {
@@ -24,6 +69,10 @@ export function parseBroadcastArgs(args: string[]): BroadcastCommand {
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
+    if (arg === "--dry-run") {
+      scope.dryRun = true;
+      continue;
+    }
     if (arg === "--session" || arg === "--team" || arg === "--fleet") {
       const value = args[++i];
       if (!value || value.startsWith("--")) throw new Error(`${arg} requires a value\n${usage()}`);
@@ -172,6 +221,13 @@ export async function cmdBroadcast(message: string, scope: BroadcastScopeOptions
   let sent = 0;
   let skipped = 0;
   const skipReasons = new Map<string, number>();
+  // 🔒 ด่านที่ 2 — ส่งซ้ำใส่ pane เดิม
+  // tmux link-window ทำให้ pane เดียวโผล่ในหลาย session (โต๊ะ codex เห็นได้จาก
+  // 08-PQ + 90-family-codex + fam-view-1..5) ⇒ วัดจริงบนเครื่อง main 7 ส.ค. 01:3x:
+  // broadcast 1 ใบ = 50 target แต่ pane จริงแค่ 20 ⇒ **30 ใบเป็นของซ้ำ (60%)**
+  // ห้อง codex 1 ห้องได้ข้อความเดียวกัน ~7 รอบ · กฎ `.endsWith("-view")` ที่มีอยู่
+  // ไม่ครอบ `fam-view-1..5` เพราะชื่อลงท้ายด้วยเลข ⇒ ด่านต้องยึด pane ไม่ใช่ชื่อ session
+  const deliveredPanes = new Set<string>();
 
   for (const s of sessions) {
     // Skip overview/scratch/view sessions
@@ -180,19 +236,54 @@ export async function cmdBroadcast(message: string, scope: BroadcastScopeOptions
     if (scope.session && s.name !== scope.session) continue;
     if (fleetSessions && !fleetSessions.has(s.name)) continue;
 
+    // 🔒 ด่าน: โต๊ะคนงานที่ตั้ง @maw-no-broadcast รับเฉพาะใบที่จ่าหน้าถึงมันด้วย --session
+    if (scope.session !== s.name && await sessionOptsOutOfBroadcast(s.name)) {
+      const paneCount = s.windows.length;
+      skipped += paneCount;
+      const reason = `worker-desk ${NO_BROADCAST_OPTION} (ใส่ --session ${s.name} ถ้าตั้งใจส่งจริง)`;
+      skipReasons.set(reason, (skipReasons.get(reason) ?? 0) + paneCount);
+      continue;
+    }
+
     for (const w of s.windows) {
       if (teamMembers && !windowMatchesTeamMember(s.name, w.name, teamMembers)) continue;
       const target = `${s.name}:${w.index}`;
       try {
         // Check if window is running an agent (shared with ssh.ts post-#1906)
-        const cmd = await tmux.run("display-message", "-t", target, "-p", "#{pane_current_command}");
+        // ดึง pane_id มาพร้อมกันในคำสั่งเดียว — ใช้กันส่งซ้ำใส่ pane ที่ link ข้าม session
+        const info = await tmux.run("display-message", "-t", target, "-p", "#{pane_id}\t#{pane_current_command}");
+        // tmux รุ่น/สภาพแวดล้อมที่ไม่คืน pane_id ⇒ ได้ก้อนเดียว = ถือว่าเป็นคำสั่งล้วน
+        // (ห้ามเดาว่าก้อนแรกคือ pane_id — pane id จริงขึ้นต้นด้วย % เสมอ
+        //  ถ้าเดา จะ dedupe ทุก pane ที่รันคำสั่งเดียวกันเหลือตัวเดียว = ใบหายเงียบ)
+        const parts = info.trim().split("\t");
+        const hasPaneId = parts.length === 2 && parts[0]!.startsWith("%");
+        const paneId = hasPaneId ? parts[0]! : "";
+        const cmd = hasPaneId ? parts[1]! : info;
         if (!isAgentCommand(cmd)) {
           skipped++;
           skipReasons.set("non-agent-pane", (skipReasons.get("non-agent-pane") ?? 0) + 1);
           continue;
         }
-        await tmux.sendText(target, message);
-        console.log(`\x1b[32msent\x1b[0m → ${s.name}:${w.name}`);
+        if (paneId && deliveredPanes.has(paneId)) {
+          skipped++;
+          const reason = "duplicate-pane (linked window — ส่งไปแล้วในชื่ออื่น)";
+          skipReasons.set(reason, (skipReasons.get(reason) ?? 0) + 1);
+          continue;
+        }
+        // ด่านระดับ window — ใบไม่จ่าหน้าไม่เข้าห้องคนงาน แม้ห้องนั้นจะ link อยู่ใน session ของบ้านคนอื่น
+        if (scope.session !== s.name && await windowOptsOutOfBroadcast(target)) {
+          skipped++;
+          const reason = `worker-window ${NO_BROADCAST_OPTION} (ใส่ --session ${s.name} ถ้าตั้งใจส่งจริง)`;
+          skipReasons.set(reason, (skipReasons.get(reason) ?? 0) + 1);
+          continue;
+        }
+        if (paneId) deliveredPanes.add(paneId);
+        if (scope.dryRun) {
+          console.log(`\x1b[33mwould send\x1b[0m → ${s.name}:${w.name}`);
+        } else {
+          await tmux.sendText(target, message);
+          console.log(`\x1b[32msent\x1b[0m → ${s.name}:${w.name}`);
+        }
         sent++;
       } catch {
         skipped++;
@@ -201,7 +292,8 @@ export async function cmdBroadcast(message: string, scope: BroadcastScopeOptions
     }
   }
 
-  console.log(`\n\x1b[32m✓\x1b[0m Broadcast to ${sent} windows (${skipped} skipped) [scope: ${scopeDescription(scope)}]`);
+  const verb = scope.dryRun ? "DRY-RUN — would broadcast to" : "Broadcast to";
+  console.log(`\n\x1b[32m✓\x1b[0m ${verb} ${sent} windows (${skipped} skipped) [scope: ${scopeDescription(scope)}]`);
   if (skipped > 0) {
     console.log(`  \x1b[90mskipped breakdown:\x1b[0m`);
     for (const [reason, count] of skipReasons) {
