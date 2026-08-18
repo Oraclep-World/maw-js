@@ -41,11 +41,11 @@ _maw_heal() {
 
   [ "${MAW_HEAL_SILENT:-0}" = "1" ] || echo "maw-heal: restoring maw (was missing)…" >&2
 
-  if bun add -g github:Soul-Brews-Studio/maw-js >/dev/null 2>&1; then
+  if bun add -g github:Oraclep-World/maw-js >/dev/null 2>&1; then
     [ "${MAW_HEAL_SILENT:-0}" = "1" ] || echo "maw-heal: restored maw (was missing)" >&2
     return 0
   else
-    [ "${MAW_HEAL_SILENT:-0}" = "1" ] || echo "maw-heal: restore failed — run manually: bun add -g github:Soul-Brews-Studio/maw-js" >&2
+    [ "${MAW_HEAL_SILENT:-0}" = "1" ] || echo "maw-heal: restore failed — run manually: bun add -g github:Oraclep-World/maw-js" >&2
     return 1
   fi
 }

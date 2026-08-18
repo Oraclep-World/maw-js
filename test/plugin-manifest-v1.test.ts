@@ -231,7 +231,7 @@ describe("manifest v1 — capabilities", () => {
       const msg = warn.mock.calls[0]?.[0] as string;
       expect(msg).toMatch(/blockchain/);
       expect(msg).toContain("runtime: maw v");
-      expect(msg).toContain("bun add -g github:Soul-Brews-Studio/maw-js#alpha");
+      expect(msg).toContain("bun add -g github:Oraclep-World/maw-js#alpha");
     } finally {
       warn.mockRestore();
       rmSync(dir, { recursive: true });

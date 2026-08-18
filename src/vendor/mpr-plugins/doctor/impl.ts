@@ -580,13 +580,13 @@ async function checkInstall(): Promise<{ name: string; ok: boolean; message: str
     }
     console.log(`  ${C.gray}attempting reinstall…${C.reset}`);
     try {
-      execSync("bun add -g github:Soul-Brews-Studio/maw-js", { stdio: "inherit" });
+      execSync("bun add -g github:Oraclep-World/maw-js", { stdio: "inherit" });
       const nowExists = existsSync(binPath);
       return {
         name: "install",
         ok: nowExists,
         message: nowExists
-          ? "reinstalled from github:Soul-Brews-Studio/maw-js"
+          ? "reinstalled from github:Oraclep-World/maw-js"
           : "reinstall did not produce the binary — manual intervention needed",
       };
     } catch (e: any) {
@@ -1155,7 +1155,7 @@ function iconForSeverity(severity: DoctorSeverity): string {
 function fixesFor(check: DoctorCheck): string[] {
   if (check.fix?.length) return check.fix;
   if (check.ok) return [];
-  if (check.name === "install") return ["bun add -g github:Soul-Brews-Studio/maw-js"];
+  if (check.name === "install") return ["bun add -g github:Oraclep-World/maw-js"];
   if (check.name === "peers:duplicates") return ["maw peers list"];
   if (check.name === "peers:stale") return ["maw doctor --fix-stale"];
   if (check.name === "worktrees:stillborn") return ["maw done <name>"];

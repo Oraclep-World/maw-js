@@ -14,7 +14,7 @@ import { join } from "path";
  * Resolution order for the maw-js source path:
  *   1. $MAW_JS_SOURCE env var (explicit override)
  *   2. `ghq list` for Soul-Brews-Studio/maw-js (if ghq present)
- *   3. ~/Code/github.com/Soul-Brews-Studio/maw-js (conventional default)
+ *   3. ~/Code/github.com/Oraclep-World/maw-js (conventional default)
  *
  * If no clone is found → ok:true with skipped message (the check is N/A
  * for users not doing maw-js development).
@@ -36,7 +36,7 @@ export async function checkMawJsBranch(): Promise<{
     return {
       name: "maw-js:branch",
       ok: true,
-      message: "no local maw-js clone found (set $MAW_JS_SOURCE or clone to ~/Code/github.com/Soul-Brews-Studio/maw-js)",
+      message: "no local maw-js clone found (set $MAW_JS_SOURCE or clone to ~/Code/github.com/Oraclep-World/maw-js)",
     };
   }
 
@@ -113,7 +113,7 @@ function resolveMawJsPath(): string | null {
     if (root) {
       const match = raw
         .split("\n")
-        .find(l => l.endsWith("/Soul-Brews-Studio/maw-js"));
+        .find(l => l.endsWith("/Oraclep-World/maw-js"));
       if (match) {
         const full = join(root, match);
         if (existsGitRepo(full)) return full;

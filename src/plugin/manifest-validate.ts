@@ -271,7 +271,7 @@ export function parseCapabilities(
         `plugin.json: unknown capability namespace "${ns}" in "${cap}" ` +
           `(known: ${[...allowedNamespaces].join(", ")})\n` +
           `  ↳ runtime: ${getRuntimeVersionString()} — if this namespace is expected, update maw: ` +
-          `bun add -g github:Soul-Brews-Studio/maw-js#alpha`,
+          `bun add -g github:Oraclep-World/maw-js#alpha`,
       );
     }
   }

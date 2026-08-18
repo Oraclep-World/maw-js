@@ -122,7 +122,7 @@ function defaultRef(): string {
 }
 
 function standardPluginGitUrl(): string {
-  return process.env.MAW_STANDARD_PLUGIN_GIT_URL || "https://github.com/Soul-Brews-Studio/maw-js.git";
+  return process.env.MAW_STANDARD_PLUGIN_GIT_URL || "https://github.com/Oraclep-World/maw-js.git";
 }
 
 function hasInstalledNodeModules(root: string): boolean {
