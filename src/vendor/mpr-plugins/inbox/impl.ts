@@ -54,7 +54,8 @@ export interface InboxStatus {
   oldest_age_seconds: number | null;
   last_archive_age_seconds: number | null;
   delta_since_last_check: number;
-  level: "green" | "red";
+  // #PQ-2026-08-19 — "unknown" = หากล่องไม่เจอ ⇒ ตอบไม่ได้ ห้ามตอบ 0
+  level: "green" | "red" | "unknown";
   reasons: string[];
 }
 
@@ -118,12 +119,35 @@ const SAFE_DRAIN_PATTERNS: Array<{ reason: string; pattern: RegExp }> = [
   { reason: "council", pattern: /\bstage\s+\d+\s+closed\b/i },
 ];
 
-export function resolveInboxDir(): string {
+// #PQ-2026-08-19 — เดิมหากล่องจาก process.cwd() ชั้นเดียว ⇒ รันจากนอก repo
+// (หรือจากโฟลเดอร์ย่อยของ repo เอง) โฟลเดอร์ไม่เจอ → topLevelInboxFiles() คืน []
+// → UNREAD 0 → ขึ้น 🟢 พร้อม "last archive never" = หน้าตาเหมือนกล่องสะอาดจริงทุกประการ
+// วัดอิสระ 4 บ้าน 18 ส.ค.: PQ 237→0 · sombro 153→0 · slaff 57→0 · tinkle 9→0
+// ⇒ เดินขึ้นหาบ้านเหมือน git หา .git · และถ้าไม่เจอจริง ต้อง "ไม่รู้" ไม่ใช่ "ศูนย์" (ดู resolveInboxDirInfo)
+export function resolveInboxDirInfo(): { dir: string; found: boolean } {
   const config = loadConfig();
-  if (config.psiPath) return join(config.psiPath, "inbox");
-  const local = join(process.cwd(), "ψ", "inbox");
-  if (existsSync(local)) return local;
-  return join(process.cwd(), "psi", "inbox");
+  if (config.psiPath) {
+    const configured = join(config.psiPath, "inbox");
+    return { dir: configured, found: existsSync(configured) };
+  }
+
+  let cursor = process.cwd();
+  for (;;) {
+    for (const psi of ["ψ", "psi"]) {
+      const candidate = join(cursor, psi, "inbox");
+      if (existsSync(candidate)) return { dir: candidate, found: true };
+    }
+    const parent = dirname(cursor);
+    if (parent === cursor) break;
+    cursor = parent;
+  }
+
+  // ไม่เจอสักชั้น — คืน path สมมุติไว้ให้ caller อ้างอิงได้ แต่ found=false คือคำตอบจริง
+  return { dir: join(process.cwd(), "ψ", "inbox"), found: false };
+}
+
+export function resolveInboxDir(): string {
+  return resolveInboxDirInfo().dir;
 }
 
 function parseFrontmatter(content: string): { frontmatter: InboxFrontmatter; body: string } {
@@ -338,6 +362,19 @@ function buildInboxStatus(
   nowMs: number,
   cursor: InboxCursorStore,
 ): InboxStatus {
+  // #PQ-2026-08-19 — fail closed: กล่องไม่มีอยู่ ≠ กล่องว่าง
+  if (!existsSync(inboxDir)) {
+    return {
+      oracle,
+      unread: 0,
+      oldest_age_seconds: null,
+      last_archive_age_seconds: null,
+      delta_since_last_check: 0,
+      level: "unknown",
+      reasons: [`inbox_dir_not_found:${inboxDir}`],
+    };
+  }
+
   const messages = loadInboxMessages(inboxDir);
   const unreadMessages = messages.filter(msg => !msg.frontmatter.read);
   const unread = unreadMessages.length;
@@ -421,6 +458,11 @@ function formatDelta(delta: number): string {
 }
 
 export function formatInboxStatus(status: InboxStatus): string {
+  if (status.level === "unknown") {
+    const where = status.reasons.find(r => r.startsWith("inbox_dir_not_found:"))?.slice("inbox_dir_not_found:".length);
+    const from = where ? where.replace(/\/(?:ψ|psi)\/inbox$/, "") : process.cwd();
+    return `⚪ UNREAD ไม่ทราบ — หากล่องไม่เจอ (ไล่ขึ้นจาก ${from})\n   → รันจากโฟลเดอร์บ้านตัวเอง หรือตั้ง psiPath ใน config`;
+  }
   const symbol = status.level === "red" ? "🔴" : "🟢";
   const oldest = status.oldest_age_seconds === null ? "none" : formatDuration(status.oldest_age_seconds);
   const archive = status.last_archive_age_seconds === null
@@ -434,6 +476,7 @@ export function formatInboxStatus(status: InboxStatus): string {
 export function formatInboxStatusList(statuses: InboxStatus[]): string {
   if (!statuses.length) return "no local fleet inboxes found";
   return statuses.map((status) => {
+    if (status.level === "unknown") return `⚪ ${status.oracle}: หากล่องไม่เจอ [${status.reasons.join(",")}]`;
     const symbol = status.level === "red" ? "🔴" : "🟢";
     const oldest = status.oldest_age_seconds === null ? "none" : formatDuration(status.oldest_age_seconds);
     const archive = status.last_archive_age_seconds === null ? "never" : `${formatDuration(status.last_archive_age_seconds)} ago`;
