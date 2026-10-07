@@ -42,6 +42,34 @@ function pendingInputNeedles(sentText: string): string[] {
   return [...needles].filter(Boolean);
 }
 
+/** Agent TUIs start their input line with the prompt marker: Claude Code `❯`, Codex `›`, plain `>`/`»`. */
+const AGENT_INPUT_RE = /^\s*[>❯»›](?:\s|$)(.*)$/;
+
+/**
+ * Text currently sitting on the agent's input line, or `null` when the
+ * capture has no agent input line (shell panes, unknown engines).
+ *
+ * Scans UP from the bottom and takes the first marker line. The bottom-most
+ * non-empty line is NOT the input line when a multi-line statusline renders
+ * under the input box — ours is 8 lines. Reading that line made both submit
+ * gates (sendText's confirm loop and #1907 verifySubmitDelivered) report
+ * "submitted" on every call, so a multi-line paste whose first Enter didn't
+ * take sat in the box until a human pressed Enter (one Discord command:
+ * 14h). Scanning up stops at the live input box before reaching chat
+ * history, which also echoes sent turns as `❯ <text>`.
+ */
+export function agentInputLineText(content: string): string | null {
+  const lines = content
+    .split("\n")
+    .map(l => l.replace(ANSI_RE, "").replace(/\r/g, ""))
+    .filter(l => l.trim());
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const m = lines[i].match(AGENT_INPUT_RE);
+    if (m) return m[1] ?? "";
+  }
+  return null;
+}
+
 function isTmuxNoServerError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return /no server/i.test(message) || /failed to connect to server/i.test(message);
@@ -546,6 +574,10 @@ export class Tmux {
   private async paneInputPending(target: string, sentText: string): Promise<boolean> {
     try {
       const content = await this.capture(target, 5);
+      const inputLine = agentInputLineText(content);
+      if (inputLine !== null) return inputLine.trim().length > 0;
+
+      // No agent input line found → legacy bottom-line check (shell panes).
       const lines = content.split("\n").filter(l => l.trim());
       const last = (lines.at(-1) ?? "").replace(ANSI_RE, "").replace(/\r/g, "");
       const sentNeedles = pendingInputNeedles(sentText);

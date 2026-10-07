@@ -7,6 +7,7 @@ import {
   curlFetch, runHook,
 } from "../../sdk";
 import { Tmux } from "../../core/transport/tmux";
+import { agentInputLineText } from "../../core/transport/tmux-class";
 import { isSameOracleName } from "./oracle-name-key";
 import { AmbiguousMatchError } from "../../core/runtime/find-window";
 import { detectWindowMismatch } from "../../core/routing";
@@ -469,6 +470,14 @@ export interface VerifySubmitResult {
   warning?: string;
 }
 
+/** Same leading text, whitespace-collapsed — the input box may wrap or truncate the paste. */
+function sharesLeadingText(inputLine: string, message: string): boolean {
+  const a = inputLine.replace(/\s+/g, " ").trim();
+  const b = message.replace(/\s+/g, " ").trim();
+  const n = Math.min(24, a.length, b.length);
+  return n > 0 && a.slice(0, n) === b.slice(0, n);
+}
+
 /**
  * #1907 — verify that the implicit Enter from `tmux send-keys` actually
  * submitted, by peeking the target pane and re-sending Enter if the message
@@ -505,8 +514,16 @@ export async function verifySubmitDelivered(
       return { delivered: false, retriesNeeded: attempt,
         warning: `submit unverified — capture-pane failed: ${reason}` };
     }
-    const tail = content.split("\n").slice(-3).join("\n");
-    if (!tail.includes(needle)) {
+    // Read the agent input line itself when the pane has one — a statusline
+    // under the input box fills the bottom lines, so a plain tail can never
+    // contain the stuck message (see agentInputLineText). Pending only when
+    // the input line starts with OUR message, so a human's half-typed text
+    // is never submitted by this backstop.
+    const inputLine = agentInputLineText(content);
+    const stillPending = inputLine !== null
+      ? sharesLeadingText(inputLine, needle)
+      : content.split("\n").slice(-3).join("\n").includes(needle);
+    if (!stillPending) {
       return { delivered: true, retriesNeeded: attempt };
     }
     if (attempt < maxRetries) {
