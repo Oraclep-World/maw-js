@@ -151,8 +151,8 @@ describe("verifySubmitDelivered (#1907) — reads the input line, not the tail",
       sendKeysFn: async () => { enters++; },
     });
     expect(r.delivered).toBe(false);
-    expect(r.warning).toContain("submit unverified after 2 Enter retries");
-    expect(enters).toBe(2);
+    expect(r.warning).toContain("submit unverified after 4 Enter retries");
+    expect(enters).toBe(4);
   });
 
   test("a human's own half-typed text is never submitted by the backstop", async () => {
@@ -160,6 +160,59 @@ describe("verifySubmitDelivered (#1907) — reads the input line, not the tail",
       ...fast,
       captureFn: async () => SCREEN_HUMAN_TYPING,
       sendKeysFn: async () => { throw new Error("must not press Enter on a human's text"); },
+    });
+    expect(r).toEqual({ delivered: true, retriesNeeded: 0 });
+  });
+});
+
+
+/**
+ * 2026-10-31 (ora101): Claude Code draws a prompt suggestion in the EMPTY box as
+ * faint text — `❯\u00a0\x1b[2m<suggestion>\x1b[0m` (bytes copied from a live
+ * `capture-pane -e` of an idle pane). Read as plain text it looks like pending
+ * input: every submit raised a false "still shows pending input" warning, and
+ * the fleet stopped reading the warning.
+ */
+const GHOST_BOX = "\x1b[39m❯\u00a0\x1b[2mก2 ภาษาเข้ม ว่างานนี้ใช้ได้\x1b[0m";
+const SCREEN_IDLE_GHOST = ["────────────────────────────────────────", GHOST_BOX, STATUSLINE].join("\n");
+
+describe("ghost text (faint prompt suggestion) is not pending input", () => {
+  test("idle box with a faint suggestion reads as empty", () => {
+    expect(agentInputLineText(SCREEN_IDLE_GHOST)).toBe("");
+  });
+
+  test("real typed text in the box (not faint) is still read", () => {
+    const typed = "\x1b[39m❯\u00a0[main:tenzai] 💬 DISCUSS — letter";
+    expect(agentInputLineText([typed, STATUSLINE].join("\n"))).toStartWith("[main:tenzai]");
+  });
+
+  test("faint span without a reset at end of line is dropped too", () => {
+    expect(agentInputLineText("❯\u00a0\x1b[2mtry something")).toBe("");
+  });
+
+  test("sendText: submitted → box shows ghost text → ONE Enter, no false retries", async () => {
+    const t = new FakeTmux();
+    t.captureScript = [SCREEN_IDLE_GHOST];
+    await t.sendText("s:0", "short letter");
+    expect(enterCount(t.calls)).toBe(1);
+  });
+
+  test("verify: letter still in the box under ghost-free render → retried and reported", async () => {
+    let enters = 0;
+    const r = await verifySubmitDelivered("s:0", LETTER, {
+      delayMs: 0, sleepFn: async () => {},
+      captureFn: async () => SCREEN_PENDING,
+      sendKeysFn: async () => { enters++; },
+    });
+    expect(r.delivered).toBe(false);
+    expect(enters).toBe(4);
+  });
+
+  test("verify: ghost text after submit is not mistaken for our letter", async () => {
+    const r = await verifySubmitDelivered("s:0", LETTER, {
+      delayMs: 0, sleepFn: async () => {},
+      captureFn: async () => SCREEN_IDLE_GHOST,
+      sendKeysFn: async () => { throw new Error("must not press Enter"); },
     });
     expect(r).toEqual({ delivered: true, retriesNeeded: 0 });
   });

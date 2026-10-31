@@ -495,7 +495,9 @@ export async function verifySubmitDelivered(
 ): Promise<VerifySubmitResult> {
   const envDelay = parseInt(process.env.MAW_HEY_VERIFY_DELAY_MS ?? "", 10);
   const delayMs = opts.delayMs ?? (Number.isFinite(envDelay) && envDelay > 0 ? envDelay : 800);
-  const maxRetries = opts.maxRetries ?? 2;
+  // 2026-10-31: 2 → 4 retries with a growing wait (see loop). A heavy pane
+  // (422k ctx, update banner) can take seconds to absorb a long paste.
+  const maxRetries = opts.maxRetries ?? 4;
   const captureFn = opts.captureFn ?? capture;
   const sendKeysFn = opts.sendKeysFn ?? sendKeys;
   const sleepFn = opts.sleepFn ?? ((ms: number) => Bun.sleep(ms));
@@ -505,7 +507,7 @@ export async function verifySubmitDelivered(
   if (!needle) return { delivered: true, retriesNeeded: 0 };
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    await sleepFn(delayMs);
+    await sleepFn(delayMs * (attempt + 1));
     let content: string;
     try {
       content = await captureFn(target, 10, host);
@@ -969,8 +971,10 @@ export async function cmdSend(
     // for live use; opt out per-call with --no-verify-submit; auto-skip
     // under MAW_TEST_MODE so existing cmdSend mock harnesses (which don't
     // stub capture-pane) don't have to adopt the verify seam.
+    let notSubmitted = "";
     if (!opts.noVerifySubmit && process.env.MAW_TEST_MODE !== "1") {
       const verify = await verifySubmitDelivered(target, outboundMessage);
+      if (!verify.delivered) notSubmitted = verify.warning || "submit unverified";
       if (verify.warning) {
         console.log(`  \x1b[33m⚠\x1b[0m ${verify.warning}`);
       } else if (verify.retriesNeeded > 0) {
@@ -1014,6 +1018,14 @@ export async function cmdSend(
     // #1980: warn on silent misdelivery to a window that isn't the named oracle.
     const mismatch = detectWindowMismatch(query, result.target, sessions);
     if (mismatch) console.log(`  \x1b[33m⚠\x1b[0m ${mismatch}`);
+    // 2026-10-31 (neta 21:11): the warning above printed mid-output, the run
+    // still said "delivered" and exited 0 — and the fleet pipes `maw hey … | tail -1`,
+    // so the only line anyone saw was the statusline echo. The verdict must be
+    // the LAST line and the exit code must say it.
+    if (notSubmitted) {
+      console.log(`\x1b[31m✗ NOT SUBMITTED\x1b[0m → ${target}: letter is in the receiver's ψ/inbox but sits unsubmitted in the pane input box (${notSubmitted}) — fix: maw send-enter ${query}`);
+      process.exitCode = 3;
+    }
     return;
   }
 

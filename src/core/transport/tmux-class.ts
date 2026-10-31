@@ -42,6 +42,19 @@ function pendingInputNeedles(sentText: string): string[] {
   return [...needles].filter(Boolean);
 }
 
+/**
+ * Faint (SGR 2) span — how Claude Code draws its prompt suggestion / placeholder
+ * in an EMPTY input box: `❯\u00a0\x1b[2m<ghost text>\x1b[0m`. Captured with
+ * `-e`, so the styling survives; strip these spans before reading the line or
+ * every idle pane looks like it still holds text.
+ *
+ * Fleet finding 2026-10-31 (ora101): all idle panes carried ghost text, so the
+ * confirm loop warned "still shows pending input" after successful submits
+ * (4 false alarms in Oct) — the warning became noise and a real stuck letter
+ * (neta, 31 Oct 21:11) went unnoticed.
+ */
+const FAINT_SPAN_RE = /\x1b\[2m[\s\S]*?(?:\x1b\[(?:0|22)?m|$)/g;
+
 /** Agent TUIs start their input line with the prompt marker: Claude Code `❯`, Codex `›`, plain `>`/`»`. */
 const AGENT_INPUT_RE = /^\s*[>❯»›](?:\s|$)(.*)$/;
 
@@ -61,7 +74,7 @@ const AGENT_INPUT_RE = /^\s*[>❯»›](?:\s|$)(.*)$/;
 export function agentInputLineText(content: string): string | null {
   const lines = content
     .split("\n")
-    .map(l => l.replace(ANSI_RE, "").replace(/\r/g, ""))
+    .map(l => l.replace(FAINT_SPAN_RE, "").replace(ANSI_RE, "").replace(/\r/g, ""))
     .filter(l => l.trim());
   for (let i = lines.length - 1; i >= 0; i--) {
     const m = lines[i].match(AGENT_INPUT_RE);
