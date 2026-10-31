@@ -898,6 +898,12 @@ export async function cmdSend(
   };
   const notifyQueuedInbox = async (inbox: ReceiverInboxResult | null, target: string, reason: string): Promise<void> => {
     if (!inbox?.ok) return;
+    try { await notifyQueuedInboxInner(inbox, target, reason); } finally {
+      // verdict = LAST line, even when the pane notify warns
+      console.log(`\x1b[36m✓ QUEUED\x1b[0m → ${inbox.oracle} ψ/inbox/${inbox.filename} (not typed into the pane: ${reason})`);
+    }
+  };
+  const notifyQueuedInboxInner = async (inbox: ReceiverInboxResult, target: string, reason: string): Promise<void> => {
     const notify = await notifyLiveInboxReceiver(inbox, senderIdentity.display, {
       listSessions: async () => sessions,
       tmux: new Tmux(),
@@ -947,7 +953,7 @@ export async function cmdSend(
         await notifyQueuedInbox(inbox, target, reason);
         return;
       }
-      console.log(`\x1b[33mqueued\x1b[0m target '${guard.oracle}' is busy — will auto-deliver when idle`);
+      console.log(`\x1b[36m✓ QUEUED\x1b[0m → ${guard.oracle} (busy; dispatch queue only, no inbox file) — will auto-deliver when idle`);
       return;
     }
 
@@ -972,7 +978,8 @@ export async function cmdSend(
     // under MAW_TEST_MODE so existing cmdSend mock harnesses (which don't
     // stub capture-pane) don't have to adopt the verify seam.
     let notSubmitted = "";
-    if (!opts.noVerifySubmit && process.env.MAW_TEST_MODE !== "1") {
+    const verifyRan = !opts.noVerifySubmit && process.env.MAW_TEST_MODE !== "1";
+    if (verifyRan) {
       const verify = await verifySubmitDelivered(target, outboundMessage);
       if (!verify.delivered) notSubmitted = verify.warning || "submit unverified";
       if (verify.warning) {
@@ -1022,9 +1029,14 @@ export async function cmdSend(
     // still said "delivered" and exited 0 — and the fleet pipes `maw hey … | tail -1`,
     // so the only line anyone saw was the statusline echo. The verdict must be
     // the LAST line and the exit code must say it.
+    // The LAST line is always the verdict (2026-11-01, Pleam: "แก้บรรทัดสุดท้ายของ maw ให้บอกผลเลย").
     if (notSubmitted) {
       console.log(`\x1b[31m✗ NOT SUBMITTED\x1b[0m → ${target}: letter is in the receiver's ψ/inbox but sits unsubmitted in the pane input box (${notSubmitted}) — fix: maw send-enter ${query}`);
       process.exitCode = 3;
+    } else if (verifyRan) {
+      console.log(`\x1b[32m✓ SUBMITTED\x1b[0m → ${target} (input box checked empty after send)`);
+    } else {
+      console.log(`\x1b[33m✓ SENT\x1b[0m → ${target} (submit not verified: --no-verify-submit or test mode)`);
     }
     return;
   }
@@ -1076,6 +1088,9 @@ export async function cmdSend(
         message: outboundMessage,
       });
       await runHook("after_send", { to: query, message: outboundMessage });
+      console.log(state === "delivered"
+        ? `\x1b[32m✓ DELIVERED\x1b[0m ⚡ ${result.node} → ${res.data.target || result.target} (remote node typed it; submit not checked from here)`
+        : `\x1b[36m✓ QUEUED\x1b[0m ⚡ ${result.node} → ${res.data.target || result.target}`);
       return;
     }
     const underlying = res.data?.error || (res.status ? `HTTP ${res.status}` : "connection failed");

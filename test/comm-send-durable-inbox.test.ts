@@ -172,5 +172,16 @@ describe("cmdSend durable receiver inbox (#1967)", () => {
       route: "inbox",
       lastLine: "tmux delivery failed: pane vanished",
     });
+    // 2026-11-01: the LAST line is the verdict, so `maw hey … | tail -1` says what happened.
+    expect(stripAnsi(logs.at(-1) ?? "")).toStartWith("✓ QUEUED → ");
+  });
+
+  test("successful pane send ends with a verdict line", async () => {
+    await runCmd();
+    expect(order).toEqual(["receiverInbox", "sendKeys"]);
+    // MAW_TEST_MODE=1 skips the submit check, so the verdict says SENT (not SUBMITTED)
+    expect(stripAnsi(logs.at(-1) ?? "")).toStartWith("✓ SENT → ");
   });
 });
+
+const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
